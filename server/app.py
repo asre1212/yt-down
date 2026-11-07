@@ -145,6 +145,8 @@ def public_job(job):
 
 def safe_error(text):
     lower = text.lower()
+    if 'invalid media' in lower or 'invalid data' in lower:
+        return 'The server did not receive a playable video. The host or network may have blocked the media download. No file was prepared.'
     if 'sign in' in lower or 'bot' in lower or '403' in lower:
         return 'YouTube blocked this server or requires sign-in for this video. No file was prepared. Try another video or use a server on your home network.'
     if 'private' in lower or 'members-only' in lower or 'premium' in lower:
@@ -206,6 +208,22 @@ async def command(job, args, timeout, progress=False):
         await asyncio.gather(*readers, return_exceptions=True)
 
 
+async def inspect_file(path):
+    process = await asyncio.create_subprocess_exec('ffprobe', '-v', 'error', '-show_entries', 'stream=codec_type,codec_name', '-of', 'json', str(path), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    try:
+        output, _ = await asyncio.wait_for(process.communicate(), 20)
+        if process.returncode:
+            raise RuntimeError('Invalid media file')
+        streams = json.loads(output).get('streams', [])
+        if not any(s.get('codec_type') == 'video' and s.get('codec_name') == 'h264' for s in streams) or not any(s.get('codec_type') == 'audio' and s.get('codec_name') == 'aac' for s in streams):
+            raise RuntimeError('Invalid media file')
+    finally:
+        if process.returncode is None:
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
+            await process.wait()
+
+
 async def prepare(job):
     folder = DATA / job['id']
     try:
@@ -231,6 +249,9 @@ async def prepare(job):
                 raise RuntimeError('No output file; maximum size may have been exceeded')
             if path.stat().st_size > MAX_BYTES:
                 raise RuntimeError('Video too large')
+            await inspect_file(path)
+            if job.get('cancel'):
+                raise asyncio.CancelledError()
             safe_name = re.sub(r'[\x00-\x1f<>:"/\\|?*]', '', job['title']).strip(' .')[:120] or 'YouTube video'
             token = secrets.token_urlsafe(32)
             job.update(state='ready', progress=100, size=path.stat().st_size, filename=safe_name + '.mp4', token=token, download_url=f'/api/files/{job["id"]}/{token}', message='Ready to save')

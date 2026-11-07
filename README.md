@@ -75,7 +75,9 @@ python -m unittest discover -s tests -v
 uvicorn server.app:app --host 127.0.0.1 --port 8080 --workers 1
 ```
 
-Automated tests cover URL validation, authorization, CORS, blocked-video errors, cancellation, file expiry, range downloads and the complete job/file API using a simulated extractor. They do **not** prove live YouTube availability. Confirm a real video download from your deployed host and save it on an actual iPhone before relying on the service.
+Automated tests cover URL validation, authorization, CORS, blocked-video errors, cancellation, file expiry, range downloads, rejection of HTML error pages posing as video, and the complete job/file API using a simulated extractor. FFprobe checks for H.264 video and AAC audio before a real job is marked ready. These tests do **not** prove live YouTube availability. Confirm a real video download from your deployed host and save it on an actual iPhone before relying on the service.
+
+Build verification on November 7, 2026: automated checks passed and the published frontend was opened successfully. A real YouTube metadata request succeeded, but media-file requests from the build environment returned a network “Site Unavailable” page; the end-to-end real-video test did not pass. The Docker image and physical iPhone saving still need deployment/device verification. No download server has been provisioned by this repository alone.
 
 ## Technical references reviewed
 

@@ -2,11 +2,12 @@ import asyncio
 import importlib
 import json
 import os
+import shutil
 import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 os.environ['API_KEY'] = 'test-key-only-not-a-real-secret-12345'
 os.environ['DOWNLOAD_DIR'] = tempfile.mkdtemp(prefix='yt-down-test-')
@@ -57,7 +58,7 @@ class DownloadTests(unittest.TestCase):
             self.assertIn('--max-filesize', args)
             (server.DATA / job['id'] / 'video.mp4').write_bytes(b'0123456789')
             return ''
-        with patch.object(server, 'tools_ready', return_value=True), patch.object(server, 'command', fake_command):
+        with patch.object(server, 'tools_ready', return_value=True), patch.object(server, 'command', fake_command), patch.object(server, 'inspect_file', AsyncMock()):
             response = self.client.post('/api/jobs', json={'url':LINK}, headers=AUTH)
             self.assertEqual(response.status_code, 202)
             job_id = response.json()['id']
@@ -102,6 +103,16 @@ class DownloadTests(unittest.TestCase):
         self.assertEqual(self.client.get('/manifest.webmanifest').json()['display'], 'standalone')
         self.assertEqual(self.client.get('/server/app.py').status_code, 404)
         self.assertEqual(self.client.get('/.env').status_code, 404)
+
+    @unittest.skipUnless(shutil.which('ffprobe'), 'FFprobe not installed')
+    def test_html_error_page_is_not_accepted_as_video(self):
+        path = server.DATA / 'not-a-video.mp4'
+        path.write_text('<html>Site Unavailable</html>')
+        try:
+            with self.assertRaisesRegex(RuntimeError, 'Invalid media file'):
+                asyncio.run(server.inspect_file(path))
+        finally:
+            path.unlink(missing_ok=True)
 
 
 if __name__ == '__main__':
