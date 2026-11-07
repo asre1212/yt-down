@@ -1,15 +1,26 @@
+---
+title: YT Down
+emoji: 📥
+colorFrom: red
+colorTo: yellow
+sdk: docker
+app_port: 8080
+---
+
 # YT Down
 
 A small iPhone Home Screen PWA: paste a YouTube link, choose quality, prepare an MP4 with sound, then save to Files.
 
 **App:** https://asre1212.github.io/yt-down/
 
-The frontend works on GitHub Pages. **Actual video downloads require the included server to be deployed and connected.** The app never pretends a link has downloaded if a server is absent. This cannot promise *any* YouTube video: private, paid, region-restricted, live, removed, or YouTube-blocked content can fail. Use it for videos you own or have permission to download.
+The Docker service serves **the app and its download server together at one address**. The app detects its built-in server automatically, so no server address needs to be entered. Unlock a device once; a secure HttpOnly session lasts up to 30 days and the access key is not stored in JavaScript storage in this mode.
+
+**Hosting still must be activated before downloads work.** GitHub Pages publishes the frontend; `docs/deployment.json` can direct it to the full app after its actual HTTPS URL is known. Never put credentials in that file. The app never pretends a link has downloaded if a server is absent. This cannot promise *any* YouTube video: private, paid, region-restricted, live, removed, or YouTube-blocked content can fail. Use it for videos you own or have permission to download.
 
 ## iPhone
 
 1. Open the app in Safari → Share → **Add to Home Screen** → **Open as Web App** if shown → Add.
-2. Connect the server once in Settings using its HTTPS address and private access key.
+2. On the hosted full app, unlock the device with its private access key. The server is detected automatically. Existing separate-server installations remain supported.
 3. Paste a video or Shorts link, select a maximum quality, and tap **Prepare download**.
 4. Keep the app open while it prepares, then tap **Save video**. If iOS opens a player, use Share → Save to Files. To save to Photos, open the MP4 in Files → Share → Save Video.
 
@@ -25,7 +36,10 @@ The Blueprint selects Render’s free web-service plan and generates a private `
 
 1. Deploy the Blueprint from this repository.
 2. In the deployed service’s Environment settings, copy the generated `API_KEY`.
-3. Open YT Down Settings, paste the service’s HTTPS URL and key, and tap **Save & connect**. You can also open the service URL itself; it hosts the same app.
+3. Open the service’s HTTPS URL. YT Down detects its built-in server; enter the access key once to unlock this device.
+4. Set `docs/deployment.json` to `{"app_url":"https://YOUR-ACTUAL-SERVICE.onrender.com"}` and commit it. The original GitHub Pages app then automatically opens the full app. Copy the actual deployed URL; never guess it. Do not put a key in this file.
+
+**Free-only requirement:** retain `plan: free`. Before provisioning, check the account’s included bandwidth and ensure payment/spending settings cannot incur overages. Free compute is not an unlimited-bandwidth guarantee. Do not upgrade, purchase a subscription, or enable paid overages without explicit user authorization.
 
 **Reliability:** YouTube can block datacenter IP addresses. A successful deployment does not establish that YouTube downloads will work from that host. This is a deployment option, not a promise of a working bypass. A server on your home network can be a more suitable location when datacenter access is blocked. The app does not bypass sign-in, payment, DRM, or geographic restrictions.
 
@@ -41,7 +55,13 @@ python -c 'import secrets; print(secrets.token_urlsafe(32))'
 docker run --rm --init --env-file .env -p 8080:8080 yt-down
 ```
 
-Serve it behind an HTTPS reverse proxy for iPhone use. Allow the PWA’s exact origin in `ALLOWED_ORIGINS` (default `https://asre1212.github.io`). Same-origin hosting also works. Never place a key in a public config, a GitHub issue, a URL, or committed source. A server key is stored only in that browser’s local storage; do not connect untrusted servers or use a shared browser profile.
+Serve it behind an HTTPS reverse proxy for iPhone use. Set `PUBLIC_APP_URL` to the public HTTPS origin when a reverse proxy forwards HTTP internally; Render’s `RENDER_EXTERNAL_URL` is detected automatically. Device-session cookies require HTTPS. Allow the PWA’s exact origin in `ALLOWED_ORIGINS` (default `https://asre1212.github.io`). Same-origin hosting also works. Never place a key in a public config, a GitHub issue, a URL, or committed source. Only legacy external-server mode stores a key in browser local storage; integrated hosting uses a secure HttpOnly cookie instead; do not connect untrusted servers or use a shared browser profile.
+
+### Hugging Face alternative
+
+The repository also includes Docker Space metadata (`sdk: docker`, `app_port: 8080`). On an eligible existing account, mirror the repository to a Docker Space, set `API_KEY` as a private Space secret, and set `PUBLIC_APP_URL` to the actual `https://….hf.space` origin. Install the PWA from the direct app origin, rather than the Hub’s embedded preview.
+
+Hugging Face’s documentation checked November 7, 2026 says creating Docker Spaces requires a paid plan, even though CPU Basic has no hourly charge. It is **not the default for the user’s free-only requirement**, and no paid plan should be purchased. Both providers need a real YouTube download test from the deployed host.
 
 ### Limits and maintenance
 
@@ -57,7 +77,7 @@ Serve it behind an HTTPS reverse proxy for iPhone use. Allow the PWA’s exact o
 
 FFmpeg merges audio/video; Deno and `yt-dlp[default]` provide YouTube extraction support. Rebuild with `--pull --no-cache` or use Render’s clear-cache redeploy to update yt-dlp when YouTube changes. Dependencies intentionally permit current yt-dlp rather than freezing an extractor that quickly becomes stale. Do not run more than one Uvicorn worker or service replica: job state is in memory.
 
-Jobs require a bearer access key; file links use separate random, short-lived download tokens so the server key never appears in a download URL. Access logs are disabled to avoid logging file tokens. API responses/files are never service-worker cached. Only canonical YouTube hosts/video IDs are accepted, and subprocesses use argument arrays, not a shell. Bot/sign-in failures are surfaced clearly. No account-cookie import is provided.
+Jobs require an authenticated device session or the legacy bearer access key; file links use separate random, short-lived download tokens so the server key never appears in a download URL. Access logs are disabled to avoid logging file tokens. API responses/files are never service-worker cached. Only canonical YouTube hosts/video IDs are accepted, and subprocesses use argument arrays, not a shell. Bot/sign-in failures are surfaced clearly. No account-cookie import is provided.
 
 ## GitHub Pages and updates
 
@@ -79,6 +99,8 @@ Automated tests cover URL validation, authorization, CORS, blocked-video errors,
 
 Build verification on November 7, 2026: automated checks passed and the published frontend was opened successfully. A real YouTube metadata request succeeded, but media-file requests from the build environment returned a network “Site Unavailable” page; the end-to-end real-video test did not pass. The Docker image and physical iPhone saving still need deployment/device verification. No download server has been provisioned by this repository alone.
 
+Integration verification: version 1.1.0 adds same-origin discovery, secure 30-day device sessions, locking, origin checks and login-attempt limits. Twelve automated checks passed. Provider deployment and a real iPhone download remain pending; publishing source code does not activate a hosted server.
+
 ## Technical references reviewed
 
 - [GitHub Pages: static hosting and publishing](https://docs.github.com/en/pages/getting-started-with-github-pages/creating-a-github-pages-site)
@@ -86,3 +108,7 @@ Build verification on November 7, 2026: automated checks passed and the publishe
 - [yt-dlp: external JavaScript requirements](https://github.com/yt-dlp/yt-dlp/wiki/EJS)
 - [Render Blueprint reference](https://render.com/docs/blueprint-spec)
 - [FastAPI file responses](https://fastapi.tiangolo.com/advanced/custom-response/)
+
+- [Hugging Face Docker Spaces](https://huggingface.co/docs/hub/spaces-sdks-docker)
+- [Hugging Face hosting eligibility](https://huggingface.co/docs/hub/spaces-overview)
+- [Render free-service limits and bandwidth](https://render.com/docs/free)

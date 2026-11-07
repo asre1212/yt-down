@@ -6,6 +6,7 @@ if (!Array.isArray(history)) history = [];
 if (!config || typeof config !== 'object') config = {};
 let active = readStore('yt-down.active', null);
 let busy = false, polling = false, pollTimer, registration, updatePending = false;
+let integrated = false, unlocked = false;
 const params = new URLSearchParams(location.search);
 const shared = params.get('url') || params.get('text');
 if (shared) { try { $('video-url').value = youtubeURL(shared); } catch {} window.history.replaceState({}, '', location.pathname); }
@@ -21,7 +22,16 @@ function panel(title, detail, state = 'working') {
   $('progress').removeAttribute('value');
 }
 function setBusy(value) { busy = value; $('download').disabled = value; $('download').querySelector('span').textContent = value ? 'Preparing your video…' : 'Prepare download'; $('quality').disabled = value; $('video-url').readOnly = value; }
-function openSettings() {
+async function openSettings() {
+  await boot;
+  $('server-address').hidden = integrated;
+  $('setup-help').hidden = integrated;
+  $('access-key-field').hidden = integrated && unlocked;
+  $('connect-button').hidden = integrated && unlocked;
+  $('lock-app').hidden = !integrated || !unlocked;
+  $('settings-intro').textContent = integrated ? (unlocked ? 'Your download server is built in and ready.' : 'Your download server is built in. Unlock this device once.') : 'Connect once. Then just paste and save.';
+  $('key-help').textContent = integrated ? 'Your key is exchanged for a secure device session. It is not saved in browser storage.' : 'Saved only in this browser on this device. Never added to GitHub.';
+  $('connect-button').textContent = integrated ? 'Unlock app' : 'Save & connect';
   $('server-url').value = config.url || (location.hostname.endsWith('.github.io') ? '' : location.origin);
   $('server-key').value = config.key || ''; $('settings-status').textContent = '';
   $('settings').showModal();
@@ -32,9 +42,9 @@ async function api(path, options = {}, chosen = config) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 65000);
   try {
-    const response = await fetch(chosen.url + path, {...options, headers:{'Authorization':`Bearer ${chosen.key}`, ...(options.body ? {'Content-Type':'application/json'} : {}), ...options.headers}, signal:controller.signal, cache:'no-store', credentials:'omit', redirect:'error'});
+    const response = await fetch(chosen.url + path, {...options, headers:{...(chosen.mode === 'session' ? {} : {'Authorization':`Bearer ${chosen.key}`}), ...(options.body ? {'Content-Type':'application/json'} : {}), ...options.headers}, signal:controller.signal, cache:'no-store', credentials:chosen.mode === 'session' ? 'same-origin' : 'omit', redirect:'error'});
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `Server error (${response.status}). Try again.`);
+    if (!response.ok) { if (response.status === 401 && integrated) { unlocked = false; setConnection('Unlock this device to download'); } throw new Error(typeof data.detail === 'string' ? data.detail : `Server error (${response.status}). Try again.`); }
     return data;
   } catch (e) {
     if (e.name === 'AbortError') throw new Error('The server is taking too long to respond. Try again in a moment.');
@@ -44,8 +54,20 @@ async function api(path, options = {}, chosen = config) {
 }
 $('settings-form').onsubmit = async event => {
   event.preventDefault();
+  await boot;
   if (busy) { $('settings-status').textContent = 'Cancel the current download before changing servers.'; return; }
   const key = $('server-key').value.trim();
+  if (integrated) {
+    if (!key) { $('settings-status').textContent = 'Enter your private access key.'; return; }
+    $('connect-button').disabled = true;
+    try {
+      await api('/api/session', {method:'POST', body:JSON.stringify({key})});
+      await api('/api/check'); unlocked = true;
+      $('server-key').value = ''; $('settings').close(); setConnection('Download server built in', 'ready'); toast('Unlocked. Paste a link to download.');
+    } catch (e) { $('settings-status').textContent = e.message; }
+    finally { $('connect-button').disabled = false; }
+    return;
+  }
   let chosen; try { chosen = {url:serverURL($('server-url').value.trim()), key}; if (!key) throw new Error('Enter your server access key.'); } catch (e) { $('settings-status').textContent = e.message; return; }
   $('connect-button').disabled = true; $('settings-status').textContent = 'Connecting… A sleeping server may take a minute.';
   try {
@@ -54,6 +76,11 @@ $('settings-form').onsubmit = async event => {
     setConnection('Download server connected', 'ready'); $('settings').close(); toast('Connected. Ready to download.');
   } catch (e) { $('settings-status').textContent = e.message; setConnection('Server needs attention', 'error'); }
   finally { $('connect-button').disabled = false; }
+};
+$('lock-app').onclick = async () => {
+  if (busy) return toast('Finish or cancel the current download first.');
+  try { await api('/api/session', {method:'DELETE'}); unlocked = false; $('settings').close(); setConnection('Unlock this device to download'); toast('This device is locked.'); }
+  catch (e) { toast(e.message); }
 };
 $('paste').onclick = async () => { try { $('video-url').value = await navigator.clipboard.readText(); $('video-url').focus(); } catch { $('video-url').focus(); toast('Touch and hold the link field, then tap Paste.'); } };
 function clearActive() { active = null; writeStore('yt-down.active', null); clearTimeout(pollTimer); }
@@ -97,9 +124,10 @@ async function poll() {
 }
 $('download-form').onsubmit = async event => {
   event.preventDefault(); if (busy) return;
+  await boot;
   let url; try { url = youtubeURL($('video-url').value); } catch (e) { panel('Check your link', e.message, 'error'); return; }
   if (!navigator.onLine) return panel('You’re offline', 'Reconnect to prepare this download.', 'error');
-  if (!config.url || !config.key) { $('job-panel').hidden = true; openSettings(); $('settings-status').textContent = 'Connect your server once to enable downloads.'; return; }
+  if (!config.url || (integrated ? !unlocked : !config.key)) { $('job-panel').hidden = true; await openSettings(); $('settings-status').textContent = integrated ? 'Unlock this device to download.' : 'Hosting has not been connected yet.'; return; }
   setBusy(true); panel('Preparing your video', 'Connecting to your server… This can take a minute if it is asleep.');
   const quality = Number($('quality').value);
   try {
@@ -127,5 +155,38 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js', {scope:'./', updateViaCache:'none'}).then(reg => { registration = reg; reg.update().catch(() => {}); if (reg.waiting && !busy) reg.waiting.postMessage('SKIP_WAITING'); reg.addEventListener('updatefound', () => { const worker = reg.installing; worker?.addEventListener('statechange', () => { if (worker.state === 'installed' && navigator.serviceWorker.controller) { if (!busy) worker.postMessage('SKIP_WAITING'); else toast('An app update is ready after this download.'); } }); }); }).catch(() => {});
   navigator.serviceWorker.addEventListener('controllerchange', () => { if (busy) { updatePending = true; return; } if (navigator.serviceWorker.controller) location.reload(); });
 }
-renderHistory(); connectivity();
-if (config.url && config.key) { setConnection('Download server saved', 'ready'); if (active?.id && active.server === config.url) { setBusy(true); poll(); } else { clearActive(); } }
+async function discover() {
+  // Only trust the current app's same-origin configuration; never send a key during discovery.
+  const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch(new URL('./api/config', location.href), {cache:'no-store', credentials:'same-origin', signal:controller.signal});
+    const data = response.ok ? await response.json() : null;
+    if (data?.app === 'yt-down' && data.integrated === true) {
+      integrated = true; unlocked = data.unlocked === true;
+      config = {url:location.origin,mode:'session'}; writeStore('yt-down.config', config);
+      setConnection(unlocked ? 'Download server built in' : 'Unlock this device to download', unlocked ? 'ready' : '');
+      if (!data.configured || !data.tools_ready) setConnection('Download service is being configured');
+    }
+  } catch {} finally { clearTimeout(timeout); }
+  if (!integrated) {
+    try {
+      const response = await fetch('./deployment.json', {cache:'no-store',signal:AbortSignal.timeout(4000)});
+      const deployment = response.ok ? await response.json() : null;
+      if (deployment?.app_url) {
+        const url = new URL(serverURL(deployment.app_url));
+        if (url.origin !== location.origin) {
+          if ($('video-url').value) url.searchParams.set('url', $('video-url').value);
+          location.replace(url.href); return;
+        }
+      }
+    } catch {}
+    if (config.url && config.key) setConnection('Download server saved', 'ready');
+    else setConnection('Download hosting is not connected yet');
+  }
+  if (config.url && (unlocked || config.key)) {
+    if (active?.id && active.server === config.url) { setBusy(true); poll(); }
+    else clearActive();
+  }
+}
+const boot = discover();
+renderHistory(); $('offline').hidden = navigator.onLine;

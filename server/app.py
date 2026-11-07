@@ -1,6 +1,7 @@
 """Single-instance personal downloader. Run with one Uvicorn worker."""
 import asyncio
 import contextlib
+import hashlib
 import hmac
 import json
 import os
@@ -14,7 +15,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -30,6 +31,30 @@ JOB_TIMEOUT = 1200
 JOBS = {}
 WORKERS = set()
 QUEUE = asyncio.Semaphore(1)
+SESSION_TTL = 30 * 24 * 3600
+SESSION_COOKIE = '__Host-yt_down_session'
+LOGIN_ATTEMPTS = {}
+
+
+def session_valid(value):
+    if len(API_KEY) < 24 or not value or len(value) > 256:
+        return False
+    try:
+        expiry, nonce, signature = value.split('.')
+        if not time.time() < int(expiry) <= time.time() + SESSION_TTL + 60:
+            return False
+        expected = hmac.new(API_KEY.encode(), f'session:{expiry}.{nonce}'.encode(), hashlib.sha256).hexdigest()
+        return hmac.compare_digest(signature, expected)
+    except (ValueError, TypeError):
+        return False
+
+
+def same_origin(request):
+    configured = os.getenv('PUBLIC_APP_URL') or os.getenv('RENDER_EXTERNAL_URL') or ''
+    expected = configured.rstrip('/') or str(request.base_url).rstrip('/')
+    origin = request.headers.get('origin')
+    if request.headers.get('sec-fetch-site') == 'cross-site' or (origin and origin != expected):
+        raise HTTPException(403, 'Open the download app directly to unlock it.')
 
 
 def canonical_url(value: str) -> str:
@@ -49,15 +74,20 @@ def canonical_url(value: str) -> str:
         raise HTTPException(422, 'Use a single youtube.com or youtu.be video link.')
 
 
-def authorize(authorization: str = Header(default='')):
+def authorize(request: Request, authorization: str = Header(default='')):
     if len(API_KEY) < 24:
         raise HTTPException(503, 'The server needs a private access key before downloads can start.')
-    if not hmac.compare_digest(authorization, 'Bearer ' + API_KEY):
-        raise HTTPException(401, 'The access key is incorrect. Check Settings.')
+    if authorization:
+        if hmac.compare_digest(authorization, 'Bearer ' + API_KEY):
+            return
+    elif session_valid(request.cookies.get(SESSION_COOKIE)):
+        same_origin(request)
+        return
+    raise HTTPException(401, 'Unlock the app with your private access key.')
 
 
 def tools_ready():
-    return bool(shutil.which('ffmpeg') and shutil.which('deno'))
+    return bool(shutil.which('ffmpeg') and shutil.which('ffprobe') and shutil.which('deno'))
 
 
 def folder_bytes(path):
@@ -125,6 +155,48 @@ async def security_headers(request: Request, call_next):
 @app.get('/api/health')
 async def health():
     return {'ok': True, 'configured': len(API_KEY) >= 24, 'tools_ready': tools_ready()}
+
+
+@app.get('/api/config')
+async def app_config(request: Request):
+    return {'app': 'yt-down', 'integrated': True, 'configured': len(API_KEY) >= 24,
+            'unlocked': session_valid(request.cookies.get(SESSION_COOKIE)), 'tools_ready': tools_ready()}
+
+
+class UnlockRequest(BaseModel):
+    key: str = Field(min_length=1, max_length=1024)
+
+
+@app.post('/api/session')
+async def unlock(body: UnlockRequest, request: Request, response: Response):
+    same_origin(request)
+    now = time.time()
+    address = request.client.host if request.client else 'unknown'
+    for client, attempts in list(LOGIN_ATTEMPTS.items()):
+        recent = [stamp for stamp in attempts if now - stamp < 900]
+        if recent:
+            LOGIN_ATTEMPTS[client] = recent
+        else:
+            del LOGIN_ATTEMPTS[client]
+    if len(LOGIN_ATTEMPTS.get(address, [])) >= 12 or len(LOGIN_ATTEMPTS) > 1024:
+        raise HTTPException(429, 'Too many unlock attempts. Try again in 15 minutes.')
+    if len(API_KEY) < 24:
+        raise HTTPException(503, 'The private access key has not been configured on this host.')
+    if not hmac.compare_digest(body.key, API_KEY):
+        LOGIN_ATTEMPTS.setdefault(address, []).append(now)
+        raise HTTPException(401, 'The access key is incorrect.')
+    LOGIN_ATTEMPTS.pop(address, None)
+    payload = f'{int(now) + SESSION_TTL}.{secrets.token_hex(16)}'
+    signature = hmac.new(API_KEY.encode(), ('session:' + payload).encode(), hashlib.sha256).hexdigest()
+    response.set_cookie(SESSION_COOKIE, payload + '.' + signature, max_age=SESSION_TTL, secure=True, httponly=True, samesite='strict', path='/')
+    return {'ok': True}
+
+
+@app.delete('/api/session')
+async def lock(request: Request, response: Response):
+    same_origin(request)
+    response.delete_cookie(SESSION_COOKIE, secure=True, httponly=True, samesite='strict', path='/')
+    return {'ok': True}
 
 
 @app.get('/api/check', dependencies=[Depends(authorize)])

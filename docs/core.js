@@ -1,4 +1,4 @@
-export const VERSION = '1.0.0';
+export const VERSION = '1.1.0';
 const ID = /^[A-Za-z0-9_-]{11}$/;
 export function youtubeURL(input) {
   const match = String(input).trim().match(/(?:^|\s)((?:https?:\/\/)?(?:www\.|m\.|music\.)?(?:youtube\.com|youtu\.be)\/[^\s<>]+)/i);
