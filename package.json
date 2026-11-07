@@ -1,1 +1,11 @@
-{"name":"yt-down","private":true,"version":"1.1.0","type":"module","scripts":{"test":"node --test tests/core.test.js"}}
+{
+  "name": "yt-down",
+  "private": true,
+  "version": "1.2.0",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-pwa.mjs",
+    "check:build": "node scripts/build-pwa.mjs --check",
+    "test": "node --test tests/*.test.js"
+  }
+}

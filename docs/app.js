@@ -1,11 +1,22 @@
 import {VERSION, youtubeURL, serverURL, readStore, writeStore} from './core.js';
+import {AppUpdates} from './updates.js';
 const $ = id => document.getElementById(id);
 let config = readStore('yt-down.config', {});
 let history = readStore('yt-down.history', []);
 if (!Array.isArray(history)) history = [];
 if (!config || typeof config !== 'object') config = {};
 let active = readStore('yt-down.active', null);
-let busy = false, polling = false, pollTimer, registration, updatePending = false;
+let busy = false, polling = false, pollTimer, updates, bootComplete = false, readyJob = null, savingFile = false;
+let resumeState = null;
+try { resumeState = JSON.parse(sessionStorage.getItem('yt-down.update-state')); sessionStorage.removeItem('yt-down.update-state'); } catch {}
+if (resumeState && typeof resumeState.url === 'string') $('video-url').value = resumeState.url;
+if ([360,480,720,1080].includes(Number(resumeState?.quality))) $('quality').value = resumeState.quality;
+if (!active && resumeState?.ready?.id) active = resumeState.ready;
+function saveUpdateState() {
+  try { sessionStorage.setItem('yt-down.update-state', JSON.stringify({url:$('video-url').value,quality:$('quality').value,ready:readyJob})); return true; }
+  catch { return !$('video-url').value && !readyJob; }
+}
+function resumeUpdates() { setTimeout(() => updates?.resume(), 0); }
 let integrated = false, unlocked = false;
 const params = new URLSearchParams(location.search);
 const shared = params.get('url') || params.get('text');
@@ -21,7 +32,7 @@ function panel(title, detail, state = 'working') {
   $('progress').hidden = !['working', 'paused'].includes(state);
   $('progress').removeAttribute('value');
 }
-function setBusy(value) { busy = value; $('download').disabled = value; $('download').querySelector('span').textContent = value ? 'Preparing your video…' : 'Prepare download'; $('quality').disabled = value; $('video-url').readOnly = value; }
+function setBusy(value) { busy = value; $('download').disabled = value; $('download').querySelector('span').textContent = value ? 'Preparing your video…' : 'Prepare download'; $('quality').disabled = value; $('video-url').readOnly = value; resumeUpdates(); }
 async function openSettings() {
   await boot;
   $('server-address').hidden = integrated;
@@ -38,6 +49,8 @@ async function openSettings() {
 }
 $('settings-open').onclick = openSettings; $('connection').onclick = openSettings;
 $('settings-close').onclick = () => $('settings').close();
+$('settings').addEventListener('close', resumeUpdates);
+document.addEventListener('focusout', resumeUpdates);
 async function api(path, options = {}, chosen = config) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 65000);
@@ -112,7 +125,7 @@ async function poll() {
       const size = Math.round(job.size / 1024 / 1024);
       panel(job.title || 'Your video is ready', `${size} MB · MP4 with sound. Tap below to save.`, 'ready');
       $('save-file').href = link.href; $('save-file').download = job.filename || 'video.mp4';
-      addHistory(job); clearActive(); setBusy(false); return;
+      readyJob = {...active}; addHistory(job); clearActive(); setBusy(false); return;
     }
     if (['error','cancelled','expired'].includes(job.state)) { panel('Couldn’t prepare this video', job.error || 'This download is no longer available. Please try again.', 'error'); clearActive(); setBusy(false); return; }
     panel(job.title || 'Preparing your video', job.message || 'Getting the video ready. Keep this app open.');
@@ -128,7 +141,7 @@ $('download-form').onsubmit = async event => {
   let url; try { url = youtubeURL($('video-url').value); } catch (e) { panel('Check your link', e.message, 'error'); return; }
   if (!navigator.onLine) return panel('You’re offline', 'Reconnect to prepare this download.', 'error');
   if (!config.url || (integrated ? !unlocked : !config.key)) { $('job-panel').hidden = true; await openSettings(); $('settings-status').textContent = integrated ? 'Unlock this device to download.' : 'Hosting has not been connected yet.'; return; }
-  setBusy(true); panel('Preparing your video', 'Connecting to your server… This can take a minute if it is asleep.');
+  readyJob = null; savingFile = false; setBusy(true); panel('Preparing your video', 'Connecting to your server… This can take a minute if it is asleep.');
   const quality = Number($('quality').value);
   try {
     const job = await api('/api/jobs', {method:'POST',body:JSON.stringify({url,quality})});
@@ -144,16 +157,22 @@ $('cancel').onclick = async () => {
 $('check-again').onclick = () => { clearTimeout(pollTimer); poll(); };
 function connectivity() { $('offline').hidden = navigator.onLine; if (navigator.onLine && active) { clearTimeout(pollTimer); poll(); } }
 window.addEventListener('online', connectivity); window.addEventListener('offline', connectivity);
-document.addEventListener('visibilitychange', () => { if (!document.hidden && active) { clearTimeout(pollTimer); poll(); } if (!document.hidden) registration?.update().catch(() => {}); });
-$('save-file').onclick = () => toast('Your browser will open the download. Choose Save to Files.');
-$('update').onclick = async () => {
-  if (busy) return toast('Finish this download before updating.');
-  if (!registration) return toast('Updates require a secure connection. Reopen the app online.');
-  try { await registration.update(); if (registration.waiting) registration.waiting.postMessage('SKIP_WAITING'); else if (updatePending) location.reload(); else toast('You have the latest installed version.'); } catch { toast('Could not check for updates. Try again online.'); }
-};
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  if (active) { clearTimeout(pollTimer); poll(); }
+  updates?.resume(); updates?.check();
+});
+window.addEventListener('online', () => { updates?.resume(); updates?.check(); });
+$('save-file').onclick = () => { savingFile = true; toast('Your browser will open the download. Choose Save to Files.'); };
+$('update').onclick = () => updates ? updates.check(true) : toast('Updates require a secure connection. Reopen the app online.');
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('./sw.js', {scope:'./', updateViaCache:'none'}).then(reg => { registration = reg; reg.update().catch(() => {}); if (reg.waiting && !busy) reg.waiting.postMessage('SKIP_WAITING'); reg.addEventListener('updatefound', () => { const worker = reg.installing; worker?.addEventListener('statechange', () => { if (worker.state === 'installed' && navigator.serviceWorker.controller) { if (!busy) worker.postMessage('SKIP_WAITING'); else toast('An app update is ready after this download.'); } }); }); }).catch(() => {});
-  navigator.serviceWorker.addEventListener('controllerchange', () => { if (busy) { updatePending = true; return; } if (navigator.serviceWorker.controller) location.reload(); });
+  updates = new AppUpdates({
+    serviceWorker:navigator.serviceWorker,
+    isSafe:() => bootComplete && !busy && !savingFile && !$('settings').open && !document.hidden && !['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName),
+    beforeReload:saveUpdateState, reload:() => location.reload(), notify:toast
+  });
+  updates.start().catch(() => {});
+  setInterval(() => { if (!document.hidden && navigator.onLine) { updates.resume(); updates.check(); } }, 15 * 60 * 1000);
 }
 async function discover() {
   // Only trust the current app's same-origin configuration; never send a key during discovery.
@@ -188,5 +207,5 @@ async function discover() {
     else clearActive();
   }
 }
-const boot = discover();
+const boot = discover().finally(() => { bootComplete = true; resumeUpdates(); });
 renderHistory(); $('offline').hidden = navigator.onLine;

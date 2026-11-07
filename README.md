@@ -83,12 +83,17 @@ Jobs require an authenticated device session or the legacy bearer access key; fi
 
 In repository Settings → Pages, select **Deploy from a branch**, **main**, **/docs**, then Save. No frontend build is needed. `/docs` contains only public PWA assets.
 
-The app checks for a new service worker on opening and returning to the foreground. Bump `VERSION` in `docs/core.js` and the cache version in `docs/sw.js` together whenever cached assets change. Updates wait while a download is active; use Settings → Check for updates afterward. Device settings/history are preserved. No analytics or third-party UI assets are loaded.
+Updates are automatic on opening, returning to the foreground, reconnecting, and every 15 minutes while the app is visible. A downloaded update applies when the app is idle. Active jobs, an open Settings dialog, editing, and handing a file to the browser defer the reload. A ready result and pasted link survive reloads; the result is checked against the server again, so expired files are not presented as valid. Settings, device sessions and history are retained. Settings → Check for updates remains available.
+
+For every frontend change, run `npm run build` and commit the generated `docs/sw.js` with the source files. Its release identifier and asset hashes are generated from the actual content; CI rejects a stale generated worker. The worker verifies all assets before installing, so an interrupted or mixed deployment keeps the previous working shell. Update the display version in `docs/core.js` and `package.json` for a named release. No analytics or third-party UI assets are loaded.
+
+GitHub Pages republishes changes pushed to main. The Render service should use automatic deploys from main when activated. App updates do not install themselves while iOS has suspended or closed the PWA; checking resumes on opening. Prepared server files still expire after 30 minutes. Extractor dependencies update on a server rebuild, not through the PWA updater.
 
 ## Development and checks
 
 ```sh
 pip install -r requirements.txt httpx
+npm run build
 npm test
 python -m unittest discover -s tests -v
 # Set API_KEY to a random string of at least 24 characters first.
@@ -112,3 +117,9 @@ Integration verification: version 1.1.0 adds same-origin discovery, secure 30-da
 - [Hugging Face Docker Spaces](https://huggingface.co/docs/hub/spaces-sdks-docker)
 - [Hugging Face hosting eligibility](https://huggingface.co/docs/hub/spaces-overview)
 - [Render free-service limits and bandwidth](https://render.com/docs/free)
+
+Auto-update verification: version 1.2.0 adds automatic idle activation, foreground/online checks, draft and ready-result recovery, content-verified shell updates, and CI checks for stale assets. Automated tests cover busy-tab deferral, first install, activation from another tab, unavailable session storage, failed/offline checks, and mixed-release cache rejection. Live server downloads and physical iPhone saving remain unverified.
+
+- [MDN: checking for worker updates](https://developer.mozilla.org/en-US/docs/Web/API/ServiceWorkerRegistration/update)
+- [web.dev: service worker lifecycle](https://web.dev/articles/service-worker-lifecycle)
+- [MDN: activating a waiting worker](https://developer.mozilla.org/en-US/docs/Web/API/ServiceWorkerGlobalScope/skipWaiting)

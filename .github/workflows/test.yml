@@ -17,5 +17,6 @@ jobs:
         with:
           node-version: '22'
       - run: pip install -r requirements.txt httpx
+      - run: npm run check:build
       - run: npm test
       - run: python -m unittest discover -s tests -v
