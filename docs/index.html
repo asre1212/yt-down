@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f8f5f0">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="YT Down">
+  <meta name="description" content="A simple, personal YouTube video downloader for your iPhone.">
+  <meta name="referrer" content="no-referrer">
+  <title>YT Down</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div class="app">
+  <header>
+    <a class="brand" href="./" aria-label="YT Down home"><img src="./icon.svg" alt="" width="34" height="34">YT Down<span class="brand-dot">.</span></a>
+    <button class="icon-button" id="settings-open" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16M8 4v6m8 4v6"/></svg></button>
+  </header>
+
+  <main>
+    <div class="intro"><span class="eyebrow">FROM LINK TO LIBRARY</span><h1>Keep a good<br>video close.</h1><p>Paste a YouTube link. Save it to your iPhone.</p></div>
+    <div id="offline" class="notice" hidden>You’re offline. Reconnect to prepare a download.</div>
+    <form id="download-form" class="download-card">
+      <label for="video-url">YouTube link</label>
+      <div class="url-row"><input id="video-url" name="url" type="text" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="youtube.com/watch?v=…" maxlength="2048" required><button type="button" class="paste" id="paste">Paste</button></div>
+      <div class="options-row"><span class="format-badge"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9 5 3-5 3Z"/></svg>MP4 video</span><label class="quality-label" for="quality">Quality<select id="quality"><option value="1080">1080p</option><option value="720" selected>720p</option><option value="480">480p</option><option value="360">360p</option></select></label></div>
+      <button class="primary" id="download" type="submit"><span>Prepare download</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg></button>
+      <p class="card-note">Video + sound · Best available up to your selection</p>
+    </form>
+
+    <section id="job-panel" class="job-panel" aria-live="polite" hidden>
+      <div class="job-heading"><span class="status-dot" id="status-dot"></span><h2 id="job-title">Preparing your video</h2></div>
+      <p id="job-detail"></p><progress id="progress" max="100" aria-label="Download progress"></progress>
+      <div class="job-actions"><a class="primary" id="save-file" hidden target="_blank" rel="noopener noreferrer">Save video ↓</a><button class="text-button" id="cancel" hidden>Cancel</button><button class="text-button" id="check-again" hidden>Check again</button></div>
+      <p id="save-help" class="small" hidden>Save to Files. To add to Photos, open the file → Share → Save Video. The prepared file expires after 30 minutes.</p>
+    </section>
+
+    <button class="connection" id="connection"><span class="connection-dot" id="connection-dot"></span><span id="connection-text">Connect your download server</span><span aria-hidden="true">↗</span></button>
+
+    <section class="recent" id="recent-section" hidden><div class="section-heading"><h2>Recent links</h2><button id="clear-history" class="text-button">Clear</button></div><ul id="history"></ul><p class="small">Links stay on this device. Videos are saved in Files.</p></section>
+
+    <details class="install"><summary><span class="install-icon">＋</span> Make it a Home Screen app <span class="chevron">⌄</span></summary><p>Open in Safari → Share → <strong>Add to Home Screen</strong>. Turn on <strong>Open as Web App</strong> if shown, then tap Add.</p></details>
+  </main>
+  <footer><span>LESS FRICTION. MORE WATCHING.</span><p>For videos you own or have permission to download.</p></footer>
+</div>
+
+<dialog id="settings">
+  <form id="settings-form"><div class="section-heading"><h2>Settings</h2><button type="button" id="settings-close" class="icon-button" aria-label="Close settings">×</button></div>
+    <p class="settings-intro">Connect once. Then just paste and save.</p>
+    <label for="server-url">Download server</label><input type="url" id="server-url" placeholder="https://your-server.onrender.com" autocomplete="off" autocapitalize="none" spellcheck="false">
+    <label for="server-key">Access key</label><input type="password" id="server-key" placeholder="Your private server key" autocomplete="off">
+    <p class="small">Saved only in this browser on this device. Never added to GitHub.</p>
+    <p id="settings-status" class="small" role="status"></p>
+    <button class="primary" id="connect-button" type="submit">Save & connect</button>
+    <details class="setup-help"><summary>First-time server setup</summary><p>GitHub hosts the app; a download server prepares the video. The repository includes the server and deployment instructions.</p><a class="text-link" href="https://github.com/asre1212/yt-down#download-server" target="_blank" rel="noopener noreferrer">Open setup guide ↗</a><p>Private, paid, region-restricted, or YouTube-blocked videos may be unavailable.</p></details>
+    <div class="settings-bottom"><span>YT Down · <span id="version"></span></span><button class="text-button" type="button" id="update">Check for updates</button></div>
+  </form>
+</dialog>
+<div id="toast" role="status" hidden></div>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

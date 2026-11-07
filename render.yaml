@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: yt-down
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: API_KEY
+        generateValue: true
+      - key: ALLOWED_ORIGINS
+        value: https://asre1212.github.io
+      - key: MAX_FILE_MB
+        value: "512"
+      - key: MAX_DURATION_SECONDS
+        value: "10800"
