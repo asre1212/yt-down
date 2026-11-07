@@ -28,11 +28,30 @@ The app shell works offline; preparing new videos needs internet. iOS may pause 
 
 ## Download server
 
+### No-card candidate: Railway
+
+The repository includes `railway.json` to build the existing Docker image and serve the PWA and downloader together. No extra database or disk is needed. **Prepared for deployment, not yet deployed or verified on Railway.**
+
+Railway's pricing checked November 7, 2026 advertises no credit card required: a one-time $5/30-day trial, followed by $1 of free usage credits per month on the $0 Free plan. This is a small resource allowance, not unlimited video hosting. GitHub account verification determines outbound access during the trial; a Limited Trial can block the downloader's required network traffic. Do not upgrade or enter a card to resolve that limitation under this project's free-only requirement.
+
+1. Connect Railway and the `asre1212/yt-down` GitHub repository; deploy `main` with its included Dockerfile and `railway.json`.
+2. Stay on Trial/Free with no payment method. Add a randomly generated private `API_KEY` of at least 24 characters as a service variable, not to this repository.
+3. Enable **Serverless** in the service's deployment settings, then deploy so the setting takes effect. Keep one replica and leave optional databases, disks and paid resources disabled. Idle sleeping conserves credits; a sleeping or restarted service may lose prepared files.
+4. Generate a public HTTPS service domain. `RAILWAY_PUBLIC_DOMAIN` is detected for secure device sessions; for a custom origin, set `PUBLIC_APP_URL` explicitly.
+5. Keep GitHub automatic deploys enabled. Verify `/api/health` reports `configured` and `tools_ready` true, then unlock the app and test a real short YouTube video. A healthy server alone does not prove that YouTube permits downloads from that host.
+6. Only after that verification, publish the actual host URL in `docs/deployment.json`. Install the PWA from the final app URL and unlock it there.
+
+When credits are exhausted, availability can stop; do not promise a continuously running free server. No bypass of network restrictions or YouTube sign-in checks is included.
+
+### Cloudflare and Hugging Face check
+
+Check these preferred providers first for new apps. Cloudflare's free frontend/Workers options do not supply this Docker runtime: its Containers documentation currently requires Workers Paid. Hugging Face open models and browser-side libraries can be free integrations, but its current Docker/Gradio Space creation rules require a paid plan. Neither is a verified $0 host for this downloader's existing Python/FFmpeg/Deno backend. Re-check official terms and runtime support when choosing a host; do not assume all products from a provider have the same free eligibility.
+
 ### Option A: deploy the included Docker service
 
 [Deploy on Render](https://render.com/deploy?repo=https://github.com/asre1212/yt-down)
 
-The Blueprint selects Render’s free web-service plan and generates a private `API_KEY`. Review the provider’s current limits before deploying. This repository does not provision a paid service automatically.
+The Blueprint selects Render’s free web-service plan and generates a private `API_KEY`. The user encountered a mandatory credit-card step even on Free, so Render is not the current no-card setup path. This repository does not provision a paid service automatically.
 
 1. Deploy the Blueprint from this repository.
 2. In the deployed service’s Environment settings, copy the generated `API_KEY`.
@@ -123,3 +142,11 @@ Auto-update verification: version 1.2.0 adds automatic idle activation, foregrou
 - [MDN: checking for worker updates](https://developer.mozilla.org/en-US/docs/Web/API/ServiceWorkerRegistration/update)
 - [web.dev: service worker lifecycle](https://web.dev/articles/service-worker-lifecycle)
 - [MDN: activating a waiting worker](https://developer.mozilla.org/en-US/docs/Web/API/ServiceWorkerGlobalScope/skipWaiting)
+
+Railway preparation verification: the configuration parses successfully, and automated tests cover HTTPS public-domain discovery and explicit custom-origin precedence while rejecting other origins. Deployment, available account credits, network eligibility, and real video downloads remain unverified.
+
+- [Cloudflare Containers pricing](https://developers.cloudflare.com/containers/platform/pricing/)
+- [Railway pricing](https://railway.com/pricing)
+- [Railway trial and account verification](https://docs.railway.com/pricing/free-trial)
+- [Railway serverless idle sleeping](https://docs.railway.com/deployments/serverless)
+- [Railway config as code](https://docs.railway.com/config-as-code/reference)

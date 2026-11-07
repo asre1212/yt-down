@@ -70,6 +70,17 @@ class DownloadTests(unittest.TestCase):
         self.assertFalse(self.client.get('/api/config').json()['unlocked'])
         self.assertEqual(self.client.get('/api/check').status_code, 401)
 
+    def test_hosted_origin_uses_railway_https_domain_and_explicit_override(self):
+        with patch.dict(os.environ, {'RAILWAY_PUBLIC_DOMAIN':'yt-test.up.railway.app','PUBLIC_APP_URL':'','RENDER_EXTERNAL_URL':''}):
+            accepted = self.client.post('/api/session', json={'key':os.environ['API_KEY']}, headers={'Origin':'https://yt-test.up.railway.app'})
+            self.assertEqual(accepted.status_code, 200)
+            for rejected in ['http://yt-test.up.railway.app','https://evil.test','https://testserver']:
+                result = self.client.post('/api/session', json={'key':os.environ['API_KEY']}, headers={'Origin':rejected})
+                self.assertEqual(result.status_code, 403)
+            with patch.dict(os.environ, {'PUBLIC_APP_URL':'https://custom.test'}):
+                self.assertEqual(self.client.post('/api/session', json={'key':os.environ['API_KEY']}, headers={'Origin':'https://custom.test'}).status_code, 200)
+                self.assertEqual(self.client.post('/api/session', json={'key':os.environ['API_KEY']}, headers={'Origin':'https://yt-test.up.railway.app'}).status_code, 403)
+
     def test_session_expiry_tamper_origin_and_rate_limit(self):
         result = self.client.post('/api/session', json={'key':os.environ['API_KEY']}, headers={'Origin':'https://evil.test'})
         self.assertEqual(result.status_code, 403)

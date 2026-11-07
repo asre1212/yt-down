@@ -50,7 +50,9 @@ def session_valid(value):
 
 
 def same_origin(request):
-    configured = os.getenv('PUBLIC_APP_URL') or os.getenv('RENDER_EXTERNAL_URL') or ''
+    railway_domain = os.getenv('RAILWAY_PUBLIC_DOMAIN', '').strip()
+    configured = (os.getenv('PUBLIC_APP_URL') or os.getenv('RENDER_EXTERNAL_URL')
+                  or (f'https://{railway_domain}' if railway_domain else ''))
     expected = configured.rstrip('/') or str(request.base_url).rstrip('/')
     origin = request.headers.get('origin')
     if request.headers.get('sec-fetch-site') == 'cross-site' or (origin and origin != expected):
