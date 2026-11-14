@@ -112,6 +112,7 @@ GitHub Pages republishes changes pushed to main. The Render service should use a
 
 ```sh
 pip install -r requirements.txt httpx
+npm ci
 npm run build
 npm test
 python -m unittest discover -s tests -v
@@ -120,6 +121,18 @@ uvicorn server.app:app --host 127.0.0.1 --port 8080 --workers 1
 ```
 
 Automated tests cover URL validation, authorization, CORS, blocked-video errors, cancellation, file expiry, range downloads, rejection of HTML error pages posing as video, and the complete job/file API using a simulated extractor. FFprobe checks for H.264 video and AAC audio before a real job is marked ready. These tests do **not** prove live YouTube availability. Confirm a real video download from your deployed host and save it on an actual iPhone before relying on the service.
+
+### Real download acceptance check
+
+Unit tests simulate extraction; they are not proof that a host can download YouTube media. After deploying the full app, set `YT_DOWN_API_KEY` privately in the test process environment, then run:
+
+```sh
+python scripts/verify-download.py --server https://YOUR-ACTUAL-HOST --url 'https://www.youtube.com/watch?v=jNQXAC9IVRw' --quality 360 --output trial.mp4
+```
+
+This opt-in check creates a real server job, downloads the completed file, and requires FFprobe to confirm H.264 video and AAC sound. It refuses to overwrite an existing file and does not print access keys or download tokens. It does not run in CI. Use a public video you have permission to download; the sample URL's availability may change.
+
+November 14, 2026 diagnosis: the live GitHub Pages deployment still contains `{"app_url":null}` and has no built-in `/api/config` endpoint. No backend has been connected by this repository. A real trial with current yt-dlp and Deno extracted “Me at the zoo” metadata, but media requests in the test environment returned 195-byte HTML “Site Unavailable” pages; the app rejected them and **no playable download was verified**. Version 1.2.1 checks a saved server before displaying a ready connection and explains missing backend configuration without erasing saved settings, history or job records. Hosting activation and a successful real-host trial remain required.
 
 Build verification on November 7, 2026: automated checks passed and the published frontend was opened successfully. A real YouTube metadata request succeeded, but media-file requests from the build environment returned a network “Site Unavailable” page; the end-to-end real-video test did not pass. The Docker image and physical iPhone saving still need deployment/device verification. No download server has been provisioned by this repository alone.
 

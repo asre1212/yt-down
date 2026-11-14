@@ -17,7 +17,7 @@ function saveUpdateState() {
   catch { return !$('video-url').value && !readyJob; }
 }
 function resumeUpdates() { setTimeout(() => updates?.resume(), 0); }
-let integrated = false, unlocked = false;
+let integrated = false, unlocked = false, integratedNeedsSetup = false, connectionIssue = '';
 const params = new URLSearchParams(location.search);
 const shared = params.get('url') || params.get('text');
 if (shared) { try { $('video-url').value = youtubeURL(shared); } catch {} window.history.replaceState({}, '', location.pathname); }
@@ -37,14 +37,14 @@ async function openSettings() {
   await boot;
   $('server-address').hidden = integrated;
   $('setup-help').hidden = integrated;
-  $('access-key-field').hidden = integrated && unlocked;
-  $('connect-button').hidden = integrated && unlocked;
+  $('access-key-field').hidden = integrated && (unlocked || integratedNeedsSetup);
+  $('connect-button').hidden = integrated && (integratedNeedsSetup || (unlocked && !connectionIssue));
   $('lock-app').hidden = !integrated || !unlocked;
-  $('settings-intro').textContent = integrated ? (unlocked ? 'Your download server is built in and ready.' : 'Your download server is built in. Unlock this device once.') : 'Connect once. Then just paste and save.';
+  $('settings-intro').textContent = integrated ? (integratedNeedsSetup ? 'This download server needs setup before it can prepare videos.' : unlocked && connectionIssue ? 'Your device is unlocked, but the server connection needs attention. Try the connection again below.' : unlocked ? 'Your download server is built in and ready.' : 'Your download server is built in. Unlock this device once.') : 'Connect once. Then just paste and save.';
   $('key-help').textContent = integrated ? 'Your key is exchanged for a secure device session. It is not saved in browser storage.' : 'Saved only in this browser on this device. Never added to GitHub.';
-  $('connect-button').textContent = integrated ? 'Unlock app' : 'Save & connect';
+  $('connect-button').textContent = integrated ? (unlocked && connectionIssue ? 'Retry connection' : 'Unlock app') : 'Save & connect';
   $('server-url').value = config.url || (location.hostname.endsWith('.github.io') ? '' : location.origin);
-  $('server-key').value = config.key || ''; $('settings-status').textContent = '';
+  $('server-key').value = config.key || ''; $('settings-status').textContent = connectionIssue;
   $('settings').showModal();
 }
 $('settings-open').onclick = openSettings; $('connection').onclick = openSettings;
@@ -57,7 +57,11 @@ async function api(path, options = {}, chosen = config) {
   try {
     const response = await fetch(chosen.url + path, {...options, headers:{...(chosen.mode === 'session' ? {} : {'Authorization':`Bearer ${chosen.key}`}), ...(options.body ? {'Content-Type':'application/json'} : {}), ...options.headers}, signal:controller.signal, cache:'no-store', credentials:chosen.mode === 'session' ? 'same-origin' : 'omit', redirect:'error'});
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) { if (response.status === 401 && integrated) { unlocked = false; setConnection('Unlock this device to download'); } throw new Error(typeof data.detail === 'string' ? data.detail : `Server error (${response.status}). Try again.`); }
+    if (!response.ok) {
+      if (response.status === 401 && integrated) { unlocked = false; setConnection('Unlock this device to download'); }
+      const error = new Error(typeof data.detail === 'string' ? data.detail : `Server error (${response.status}). Try again.`);
+      error.status = response.status; throw error;
+    }
     return data;
   } catch (e) {
     if (e.name === 'AbortError') throw new Error('The server is taking too long to respond. Try again in a moment.');
@@ -65,28 +69,38 @@ async function api(path, options = {}, chosen = config) {
     throw e;
   } finally { clearTimeout(timeout); }
 }
+async function checkServer(chosen = config) {
+  const checked = await api('/api/check', {}, chosen);
+  if (checked.ok !== true) throw new Error('This address did not respond as a compatible download server.');
+  return checked;
+}
 $('settings-form').onsubmit = async event => {
   event.preventDefault();
   await boot;
   if (busy) { $('settings-status').textContent = 'Cancel the current download before changing servers.'; return; }
   const key = $('server-key').value.trim();
   if (integrated) {
-    if (!key) { $('settings-status').textContent = 'Enter your private access key.'; return; }
+    if (integratedNeedsSetup) { $('settings-status').textContent = connectionIssue; return; }
+    const retry = unlocked && !!connectionIssue;
+    if (!retry && !key) { $('settings-status').textContent = 'Enter your private access key.'; return; }
     $('connect-button').disabled = true;
     try {
-      await api('/api/session', {method:'POST', body:JSON.stringify({key})});
-      await api('/api/check'); unlocked = true;
-      $('server-key').value = ''; $('settings').close(); setConnection('Download server built in', 'ready'); toast('Unlocked. Paste a link to download.');
-    } catch (e) { $('settings-status').textContent = e.message; }
+      if (!retry) await api('/api/session', {method:'POST', body:JSON.stringify({key})});
+      await checkServer(); unlocked = true; connectionIssue = '';
+      $('server-key').value = ''; $('settings').close(); setConnection('Download server built in', 'ready'); toast('Unlocked. Paste a link to download.'); resumeActiveJob();
+    } catch (e) {
+      connectionIssue = e.message; $('settings-status').textContent = e.message;
+      if (!unlocked) { $('access-key-field').hidden = false; $('connect-button').textContent = 'Unlock app'; }
+    }
     finally { $('connect-button').disabled = false; }
     return;
   }
   let chosen; try { chosen = {url:serverURL($('server-url').value.trim()), key}; if (!key) throw new Error('Enter your server access key.'); } catch (e) { $('settings-status').textContent = e.message; return; }
   $('connect-button').disabled = true; $('settings-status').textContent = 'Connecting… A sleeping server may take a minute.';
   try {
-    await api('/api/check', {}, chosen); config = chosen;
+    await checkServer(chosen); config = chosen; connectionIssue = '';
     if (!writeStore('yt-down.config', config)) toast('Connected for this session. This browser cannot save settings.');
-    setConnection('Download server connected', 'ready'); $('settings').close(); toast('Connected. Ready to download.');
+    setConnection('Download server connected', 'ready'); $('settings').close(); toast('Connected. Ready to download.'); resumeActiveJob();
   } catch (e) { $('settings-status').textContent = e.message; setConnection('Server needs attention', 'error'); }
   finally { $('connect-button').disabled = false; }
 };
@@ -97,6 +111,9 @@ $('lock-app').onclick = async () => {
 };
 $('paste').onclick = async () => { try { $('video-url').value = await navigator.clipboard.readText(); $('video-url').focus(); } catch { $('video-url').focus(); toast('Touch and hold the link field, then tap Paste.'); } };
 function clearActive() { active = null; writeStore('yt-down.active', null); clearTimeout(pollTimer); }
+function resumeActiveJob() {
+  if (active?.id && active.server === config.url) { setBusy(true); poll(); }
+}
 function addHistory(job) {
   history = [{url:active.url,title:job.title || 'YouTube video',at:Date.now(),quality:active.quality}, ...history.filter(item => item.url !== active.url)].slice(0,8);
   writeStore('yt-down.history', history); renderHistory();
@@ -140,6 +157,7 @@ $('download-form').onsubmit = async event => {
   await boot;
   let url; try { url = youtubeURL($('video-url').value); } catch (e) { panel('Check your link', e.message, 'error'); return; }
   if (!navigator.onLine) return panel('You’re offline', 'Reconnect to prepare this download.', 'error');
+  if (integratedNeedsSetup) { await openSettings(); return; }
   if (!config.url || (integrated ? !unlocked : !config.key)) { $('job-panel').hidden = true; await openSettings(); $('settings-status').textContent = integrated ? 'Unlock this device to download.' : 'Hosting has not been connected yet.'; return; }
   readyJob = null; savingFile = false; setBusy(true); panel('Preparing your video', 'Connecting to your server… This can take a minute if it is asleep.');
   const quality = Number($('quality').value);
@@ -176,15 +194,20 @@ if ('serviceWorker' in navigator) {
 }
 async function discover() {
   // Only trust the current app's same-origin configuration; never send a key during discovery.
+  let verified = false;
   const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 8000);
   try {
     const response = await fetch(new URL('./api/config', location.href), {cache:'no-store', credentials:'same-origin', signal:controller.signal});
     const data = response.ok ? await response.json() : null;
     if (data?.app === 'yt-down' && data.integrated === true) {
       integrated = true; unlocked = data.unlocked === true;
-      config = {url:location.origin,mode:'session'}; writeStore('yt-down.config', config);
-      setConnection(unlocked ? 'Download server built in' : 'Unlock this device to download', unlocked ? 'ready' : '');
-      if (!data.configured || !data.tools_ready) setConnection('Download service is being configured');
+      // Discovery chooses an in-memory connection; it must not erase a saved server or key.
+      config = {url:location.origin,mode:'session'};
+      integratedNeedsSetup = data.configured !== true || data.tools_ready !== true;
+      if (integratedNeedsSetup) {
+        connectionIssue = data.configured !== true ? 'The host owner must configure a private access key before downloads can start.' : 'The download server is missing required tools. The host owner must redeploy it using the included Dockerfile.';
+        setConnection('Download server needs setup', 'error');
+      } else if (!unlocked) setConnection('Unlock this device to download');
     }
   } catch {} finally { clearTimeout(timeout); }
   if (!integrated) {
@@ -199,13 +222,22 @@ async function discover() {
         }
       }
     } catch {}
-    if (config.url && config.key) setConnection('Download server saved', 'ready');
-    else setConnection('Download hosting is not connected yet');
+    if (!config.url || !config.key) setConnection('Download hosting is not connected yet');
   }
-  if (config.url && (unlocked || config.key)) {
-    if (active?.id && active.server === config.url) { setBusy(true); poll(); }
-    else clearActive();
+  if (!integratedNeedsSetup && config.url && (integrated ? unlocked : config.key)) {
+    setConnection('Checking download server…');
+    try {
+      serverURL(config.url);
+      await checkServer();
+      verified = true; connectionIssue = '';
+      setConnection(integrated ? 'Download server built in' : 'Download server connected', 'ready');
+    } catch (error) {
+      connectionIssue = error.message;
+      setConnection(error.status === 401 ? (integrated ? 'Unlock this device to download' : 'Access key needs attention') : 'Cannot reach the download server', 'error');
+    }
   }
+  // A failed connection check must leave saved job and server records available for retry.
+  if (verified) resumeActiveJob();
 }
 const boot = discover().finally(() => { bootComplete = true; resumeUpdates(); });
 renderHistory(); $('offline').hidden = navigator.onLine;
