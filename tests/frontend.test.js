@@ -55,11 +55,11 @@ function assertSavedDataPreserved(f,config) {
 
 test('absent backend displays setup, preserves saved links/jobs/draft and never attempts a download', async t => {
   const f = await fixture(); t.after(f.close);
-  assert.match(f.q('connection-text').textContent,/hosting is not connected/);
+  assert.match(f.q('connection-text').textContent,/Start YT Down on your computer/);
   assert(!f.q('connection-dot').classList.contains('ready'));
   await f.q('download-form').onsubmit({preventDefault(){}});
   assert(f.q('settings').open);
-  assert.match(f.q('settings-status').textContent,/Hosting has not been connected/);
+  assert.match(f.q('settings-status').textContent,/run on your own computer/);
   assert(!f.calls.some(call=>call.url.includes('/api/jobs')));
   assertSavedDataPreserved(f);
   assert(f.calls.every(call=>!call.options.headers?.Authorization));
@@ -107,7 +107,7 @@ for (const missing of ['configured','tools_ready']) test('integrated host missin
   await f.q('download-form').onsubmit({preventDefault(){}});
   assert(f.q('settings').open);
   assert(f.q('connect-button').hidden); assert(f.q('access-key-field').hidden);
-  assert.match(f.q('settings-status').textContent,missing==='configured' ? /host owner must configure/ : /missing required tools/);
+  assert.match(f.q('settings-status').textContent,missing==='configured' ? /private access key/ : /missing FFmpeg or Deno/);
   assert(!f.calls.some(call=>call.url.includes('/api/check')||call.url.includes('/api/jobs')));
   assertSavedDataPreserved(f,syntheticConfig);
 });
@@ -215,4 +215,21 @@ test('successful reconnection never polls a pending job saved for a different se
   await new Promise(resolve=>setImmediate(resolve));
   assert(!f.calls.some(call=>new URL(call.url).pathname.startsWith('/api/jobs')));
   assertSavedDataPreserved(f,syntheticConfig);
+});
+
+test('start.py address unlocks a plain-HTTP home-network host from the #key fragment and removes the key from the address bar', async t => {
+  const f = await fixture({discovery:{app:'yt-down',integrated:true,unlocked:false,configured:true,tools_ready:true},url:'http://192.168.1.20:8080/#key=synthetic-fragment-key-not-a-secret'}); t.after(f.close);
+  const unlock=f.calls.find(call=>call.url==='http://192.168.1.20:8080/api/session');
+  assert(unlock); assert.equal(JSON.parse(unlock.options.body).key,'synthetic-fragment-key-not-a-secret');
+  assert.equal(f.w.location.hash,'');
+  assert.equal(f.q('connection-text').textContent,'Download server built in');
+  assert(f.q('connection-dot').classList.contains('ready'));
+  assert(!f.w.localStorage.getItem('yt-down.config')?.includes('synthetic-fragment-key'));
+});
+
+test('a rejected #key leaves the device locked and explains why', async t => {
+  const f = await fixture({discovery:{app:'yt-down',integrated:true,unlocked:false,configured:true,tools_ready:true},sessionStatus:401,url:'http://192.168.1.20:8080/#key=wrong'}); t.after(f.close);
+  assert.equal(f.w.location.hash,'');
+  assert.equal(f.q('connection-text').textContent,'Unlock this device to download');
+  assert(!f.calls.some(call=>call.url.includes('/api/check')));
 });

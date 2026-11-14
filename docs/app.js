@@ -65,7 +65,7 @@ async function api(path, options = {}, chosen = config) {
     return data;
   } catch (e) {
     if (e.name === 'AbortError') throw new Error('The server is taking too long to respond. Try again in a moment.');
-    if (e instanceof TypeError) throw new Error('Cannot reach the download server. Check its address or wait for it to wake up.');
+    if (e instanceof TypeError) throw new Error('Cannot reach the download server. Make sure YT Down is running on your computer and check its address.');
     throw e;
   } finally { clearTimeout(timeout); }
 }
@@ -158,8 +158,8 @@ $('download-form').onsubmit = async event => {
   let url; try { url = youtubeURL($('video-url').value); } catch (e) { panel('Check your link', e.message, 'error'); return; }
   if (!navigator.onLine) return panel('You’re offline', 'Reconnect to prepare this download.', 'error');
   if (integratedNeedsSetup) { await openSettings(); return; }
-  if (!config.url || (integrated ? !unlocked : !config.key)) { $('job-panel').hidden = true; await openSettings(); $('settings-status').textContent = integrated ? 'Unlock this device to download.' : 'Hosting has not been connected yet.'; return; }
-  readyJob = null; savingFile = false; setBusy(true); panel('Preparing your video', 'Connecting to your server… This can take a minute if it is asleep.');
+  if (!config.url || (integrated ? !unlocked : !config.key)) { $('job-panel').hidden = true; await openSettings(); $('settings-status').textContent = integrated ? 'Unlock this device to download.' : 'Downloads run on your own computer. Run python start.py there, then open the address it prints.'; return; }
+  readyJob = null; savingFile = false; setBusy(true); panel('Preparing your video', 'Asking your download server to fetch the video…');
   const quality = Number($('quality').value);
   try {
     const job = await api('/api/jobs', {method:'POST',body:JSON.stringify({url,quality})});
@@ -205,9 +205,17 @@ async function discover() {
       config = {url:location.origin,mode:'session'};
       integratedNeedsSetup = data.configured !== true || data.tools_ready !== true;
       if (integratedNeedsSetup) {
-        connectionIssue = data.configured !== true ? 'The host owner must configure a private access key before downloads can start.' : 'The download server is missing required tools. The host owner must redeploy it using the included Dockerfile.';
+        connectionIssue = data.configured !== true ? 'Start this server with python start.py so it gets a private access key.' : 'The download server is missing FFmpeg or Deno. Start it with python start.py, which installs them.';
         setConnection('Download server needs setup', 'error');
-      } else if (!unlocked) setConnection('Unlock this device to download');
+      } else if (!unlocked) {
+        // The address printed by start.py carries the key in the #fragment, which never reaches any server log.
+        const key = new URLSearchParams(location.hash.slice(1)).get('key');
+        if (key) {
+          window.history.replaceState({}, '', location.pathname + location.search);
+          try { await api('/api/session', {method:'POST', body:JSON.stringify({key})}); unlocked = true; } catch (e) { connectionIssue = e.message; }
+        }
+        if (!unlocked) setConnection('Unlock this device to download');
+      }
     }
   } catch {} finally { clearTimeout(timeout); }
   if (!integrated) {
@@ -222,12 +230,12 @@ async function discover() {
         }
       }
     } catch {}
-    if (!config.url || !config.key) setConnection('Download hosting is not connected yet');
+    if (!config.url || !config.key) setConnection('Start YT Down on your computer to download');
   }
   if (!integratedNeedsSetup && config.url && (integrated ? unlocked : config.key)) {
     setConnection('Checking download server…');
     try {
-      serverURL(config.url);
+      if (!integrated) serverURL(config.url); // Same-origin hosts may be plain HTTP on a home network.
       await checkServer();
       verified = true; connectionIssue = '';
       setConnection(integrated ? 'Download server built in' : 'Download server connected', 'ready');

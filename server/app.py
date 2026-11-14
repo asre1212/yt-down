@@ -33,7 +33,13 @@ WORKERS = set()
 QUEUE = asyncio.Semaphore(1)
 SESSION_TTL = 30 * 24 * 3600
 SESSION_COOKIE = '__Host-yt_down_session'
+# Plain-HTTP cookie for a home-network address such as http://192.168.1.20:8080 (no HTTPS available).
+LOCAL_COOKIE = 'yt_down_session'
 LOGIN_ATTEMPTS = {}
+
+
+def session_cookie(request):
+    return request.cookies.get(SESSION_COOKIE) or request.cookies.get(LOCAL_COOKIE)
 
 
 def session_valid(value):
@@ -82,7 +88,7 @@ def authorize(request: Request, authorization: str = Header(default='')):
     if authorization:
         if hmac.compare_digest(authorization, 'Bearer ' + API_KEY):
             return
-    elif session_valid(request.cookies.get(SESSION_COOKIE)):
+    elif session_valid(session_cookie(request)):
         same_origin(request)
         return
     raise HTTPException(401, 'Unlock the app with your private access key.')
@@ -162,7 +168,7 @@ async def health():
 @app.get('/api/config')
 async def app_config(request: Request):
     return {'app': 'yt-down', 'integrated': True, 'configured': len(API_KEY) >= 24,
-            'unlocked': session_valid(request.cookies.get(SESSION_COOKIE)), 'tools_ready': tools_ready()}
+            'unlocked': session_valid(session_cookie(request)), 'tools_ready': tools_ready()}
 
 
 class UnlockRequest(BaseModel):
@@ -190,7 +196,9 @@ async def unlock(body: UnlockRequest, request: Request, response: Response):
     LOGIN_ATTEMPTS.pop(address, None)
     payload = f'{int(now) + SESSION_TTL}.{secrets.token_hex(16)}'
     signature = hmac.new(API_KEY.encode(), ('session:' + payload).encode(), hashlib.sha256).hexdigest()
-    response.set_cookie(SESSION_COOKIE, payload + '.' + signature, max_age=SESSION_TTL, secure=True, httponly=True, samesite='strict', path='/')
+    secure = request.url.scheme == 'https'
+    name = SESSION_COOKIE if secure else LOCAL_COOKIE
+    response.set_cookie(name, payload + '.' + signature, max_age=SESSION_TTL, secure=secure, httponly=True, samesite='strict', path='/')
     return {'ok': True}
 
 
@@ -198,13 +206,14 @@ async def unlock(body: UnlockRequest, request: Request, response: Response):
 async def lock(request: Request, response: Response):
     same_origin(request)
     response.delete_cookie(SESSION_COOKIE, secure=True, httponly=True, samesite='strict', path='/')
+    response.delete_cookie(LOCAL_COOKIE, httponly=True, samesite='strict', path='/')
     return {'ok': True}
 
 
 @app.get('/api/check', dependencies=[Depends(authorize)])
 async def check():
     if not tools_ready():
-        raise HTTPException(503, 'The server is missing FFmpeg or Deno. Redeploy using the included Dockerfile.')
+        raise HTTPException(503, 'The server is missing FFmpeg or Deno. Start it with `python start.py`, which installs them.')
     return {'ok': True}
 
 
@@ -222,7 +231,7 @@ def safe_error(text):
     if 'invalid media' in lower or 'invalid data' in lower:
         return 'The server did not receive a playable video. The host or network may have blocked the media download. No file was prepared.'
     if 'sign in' in lower or 'bot' in lower or '403' in lower:
-        return 'YouTube blocked this server or requires sign-in for this video. No file was prepared. Try another video or use a server on your home network.'
+        return 'YouTube blocked this server or requires sign-in for this video. No file was prepared. Run YT Down on your own computer (python start.py) instead of a cloud server.'
     if 'private' in lower or 'members-only' in lower or 'premium' in lower:
         return 'This video requires account access and cannot be downloaded here.'
     if 'not available' in lower or 'removed' in lower or 'unavailable' in lower:
@@ -237,7 +246,7 @@ def safe_error(text):
 
 
 async def command(job, args, timeout, progress=False):
-    process = await asyncio.create_subprocess_exec(sys.executable, '-m', 'yt_dlp', *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, limit=8 * 1024 * 1024, start_new_session=True)
+    process = await asyncio.create_subprocess_exec(sys.executable, '-m', 'yt_dlp', *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, limit=8 * 1024 * 1024, start_new_session=os.name != 'nt')
     output, errors = [], []
 
     async def drain(stream, chunks):
@@ -274,7 +283,10 @@ async def command(job, args, timeout, progress=False):
     finally:
         if process.returncode is None:
             with contextlib.suppress(ProcessLookupError):
-                os.killpg(process.pid, signal.SIGKILL)
+                if os.name == 'nt':
+                    process.kill()
+                else:
+                    os.killpg(process.pid, signal.SIGKILL)
             await process.wait()
         for reader in readers:
             if not reader.done():
@@ -347,7 +359,7 @@ async def create_job(body: DownloadRequest):
     if body.quality not in {360, 480, 720, 1080}:
         raise HTTPException(422, 'Choose 360p, 480p, 720p, or 1080p.')
     if not tools_ready():
-        raise HTTPException(503, 'The server is missing FFmpeg or Deno. Redeploy using the included Dockerfile.')
+        raise HTTPException(503, 'The server is missing FFmpeg or Deno. Start it with `python start.py`, which installs them.')
     pending = [job for job in JOBS.values() if job['state'] in {'queued', 'working'}]
     for job in pending:
         if job['url'] == url and job['quality'] == body.quality and not job.get('cancel'):

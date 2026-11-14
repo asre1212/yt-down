@@ -70,6 +70,20 @@ class DownloadTests(unittest.TestCase):
         self.assertFalse(self.client.get('/api/config').json()['unlocked'])
         self.assertEqual(self.client.get('/api/check').status_code, 401)
 
+    def test_plain_http_home_network_session(self):
+        with TestClient(server.app, base_url='http://192.168.1.20:8080') as client:
+            response = client.post('/api/session', json={'key':os.environ['API_KEY']}, headers={'Origin':'http://192.168.1.20:8080'})
+            self.assertEqual(response.status_code, 200)
+            cookie = response.headers['set-cookie']
+            self.assertTrue(cookie.startswith('yt_down_session='))
+            self.assertNotIn('Secure', cookie)
+            for flag in ['HttpOnly', 'SameSite=strict']:
+                self.assertIn(flag, cookie)
+            self.assertTrue(client.get('/api/config').json()['unlocked'])
+            self.assertEqual(client.post('/api/session', json={'key':os.environ['API_KEY']}, headers={'Origin':'http://evil.test'}).status_code, 403)
+            client.delete('/api/session', headers={'Origin':'http://192.168.1.20:8080'})
+            self.assertFalse(client.get('/api/config').json()['unlocked'])
+
     def test_hosted_origin_uses_railway_https_domain_and_explicit_override(self):
         with patch.dict(os.environ, {'RAILWAY_PUBLIC_DOMAIN':'yt-test.up.railway.app','PUBLIC_APP_URL':'','RENDER_EXTERNAL_URL':''}):
             accepted = self.client.post('/api/session', json={'key':os.environ['API_KEY']}, headers={'Origin':'https://yt-test.up.railway.app'})

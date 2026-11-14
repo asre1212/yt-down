@@ -1,165 +1,94 @@
----
-title: YT Down
-emoji: 📥
-colorFrom: red
-colorTo: yellow
-sdk: docker
-app_port: 8080
----
-
 # YT Down
 
-A small iPhone Home Screen PWA: paste a YouTube link, choose quality, prepare an MP4 with sound, then save to Files.
+Paste a YouTube link → get an **MP4 with sound** (H.264 + AAC, up to 1080p) on your computer or iPhone. Free: no hosting bill, no account, no credit card.
 
-**App:** https://asre1212.github.io/yt-down/
+**App page:** https://asre1212.github.io/yt-down/ · Use it for videos you own or have permission to download.
 
-The Docker service serves **the app and its download server together at one address**. The app detects its built-in server automatically, so no server address needs to be entered. Unlock a device once; a secure HttpOnly session lasts up to 30 days and the access key is not stored in JavaScript storage in this mode.
+## How it works (and why)
 
-**Hosting still must be activated before downloads work.** GitHub Pages publishes the frontend; `docs/deployment.json` can direct it to the full app after its actual HTTPS URL is known. Never put credentials in that file. The app never pretends a link has downloaded if a server is absent. This cannot promise *any* YouTube video: private, paid, region-restricted, live, removed, or YouTube-blocked content can fail. Use it for videos you own or have permission to download.
+YouTube refuses to serve videos to cloud/datacenter servers ("Sign in to confirm you're not a bot"). This was tested on November 14, 2026: GitHub Actions runners (Linux x64, Linux ARM, Windows, macOS) were blocked on every attempt, including with yt-dlp's alternative player clients. Free cloud hosts (Render, Railway, Hugging Face, Cloudflare) run in the same kind of datacenter and also need a card or a paid plan. So the app does not depend on a cloud server.
 
-## iPhone
+Instead, **your own computer prepares the video**. `start.py` runs a small server (yt-dlp + FFmpeg) on your Mac/PC. It hosts the app too, so you open its address on the computer, or on your iPhone over the same Wi-Fi. Everything it installs is free and lives inside this folder (`.venv`). No admin rights, Homebrew, or Docker are needed.
 
-1. Open the app in Safari → Share → **Add to Home Screen** → **Open as Web App** if shown → Add.
-2. On the hosted full app, unlock the device with its private access key. The server is detected automatically. Existing separate-server installations remain supported.
-3. Paste a video or Shorts link, select a maximum quality, and tap **Prepare download**.
-4. Keep the app open while it prepares, then tap **Save video**. If iOS opens a player, use Share → Save to Files. To save to Photos, open the MP4 in Files → Share → Save Video.
+## Setup
 
-The app shell works offline; preparing new videos needs internet. iOS may pause a background web app. Reopening resumes status checks for the most recent job. Large videos stream directly to the browser instead of being held in JavaScript memory. History stores links, not video files. Native share-target support varies by browser; copying and pasting is the supported iPhone flow.
+One-time, on a Mac, Windows, or Linux computer:
 
-## Download server
+1. Install **Python 3.10+** if you don't have it: https://www.python.org/downloads/ (on Windows, tick "Add python.exe to PATH").
+2. Download this project: **Code → Download ZIP** on GitHub and unzip it, or run `git clone https://github.com/asre1212/yt-down.git`.
 
-### No-card candidate: Railway
+Each time you want to download:
 
-The repository includes `railway.json` to build the existing Docker image and serve the PWA and downloader together. No extra database or disk is needed. **Prepared for deployment, not yet deployed or verified on Railway.**
+3. Open a terminal in the project folder and run:
+   ```sh
+   python3 start.py        # Windows: py start.py
+   ```
+   The first run takes about a minute while it installs yt-dlp, FFmpeg, and Deno into `.venv`. After that it starts in seconds and updates yt-dlp automatically.
+4. Your browser opens YT Down. Paste a link, choose a quality, tap **Prepare download**, then **Save video**. On a computer the file goes to your Downloads folder.
+5. **iPhone:** keep the computer on the same Wi-Fi and scan the QR code shown in the terminal with the Camera, or type the `http://192.168.…` address into Safari. The link unlocks your phone automatically. Tap **Save video** → **Download** and the MP4 goes to Files → Downloads. To put it in Photos, open it in Files → Share → **Save Video**.
 
-Railway's pricing checked November 7, 2026 advertises no credit card required: a one-time $5/30-day trial, followed by $1 of free usage credits per month on the $0 Free plan. This is a small resource allowance, not unlimited video hosting. GitHub account verification determines outbound access during the trial; a Limited Trial can block the downloader's required network traffic. Do not upgrade or enter a card to resolve that limitation under this project's free-only requirement.
+Leave the terminal window open while you use the app. Press Ctrl+C to stop.
 
-1. Connect Railway and the `asre1212/yt-down` GitHub repository; deploy `main` with its included Dockerfile and `railway.json`.
-2. Stay on Trial/Free with no payment method. Add a randomly generated private `API_KEY` of at least 24 characters as a service variable, not to this repository.
-3. Enable **Serverless** in the service's deployment settings, then deploy so the setting takes effect. Keep one replica and leave optional databases, disks and paid resources disabled. Idle sleeping conserves credits; a sleeping or restarted service may lose prepared files.
-4. Generate a public HTTPS service domain. `RAILWAY_PUBLIC_DOMAIN` is detected for secure device sessions; for a custom origin, set `PUBLIC_APP_URL` explicitly.
-5. Keep GitHub automatic deploys enabled. Verify `/api/health` reports `configured` and `tools_ready` true, then unlock the app and test a real short YouTube video. A healthy server alone does not prove that YouTube permits downloads from that host.
-6. Only after that verification, publish the actual host URL in `docs/deployment.json`. Install the PWA from the final app URL and unlock it there.
+If your computer asks whether Python may accept incoming network connections, click **Allow** so the iPhone can reach it. Use `python3 start.py --local-only` if you only use the computer.
 
-When credits are exhausted, availability can stop; do not promise a continuously running free server. No bypass of network restrictions or YouTube sign-in checks is included.
+### Options
 
-### Cloudflare and Hugging Face check
+| Command | What it does |
+|---|---|
+| `python3 start.py --port 8090` | Use another port if 8080 is busy |
+| `python3 start.py --local-only` | Only this computer can connect |
+| `python3 start.py --no-browser` | Don't open a browser tab |
+| `python3 start.py --tunnel` | Also prints a temporary **HTTPS** address that works away from home. This needs the free [`cloudflared`](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) (no account). The address changes on every start. *Not yet verified end to end: the build machine's network blocks Cloudflare's tunnel port.* |
 
-Check these preferred providers first for new apps. Cloudflare's free frontend/Workers options do not supply this Docker runtime: its Containers documentation currently requires Workers Paid. Hugging Face open models and browser-side libraries can be free integrations, but its current Docker/Gradio Space creation rules require a paid plan. Neither is a verified $0 host for this downloader's existing Python/FFmpeg/Deno backend. Re-check official terms and runtime support when choosing a host; do not assume all products from a provider have the same free eligibility.
+### Privacy and security
 
-### Option A: deploy the included Docker service
+- `start.py` creates a random private access key in `.yt-down-key`. This file is git-ignored and never committed. The printed links carry the key after `#`, which browsers don't send to servers. The app swaps it for a 30-day HttpOnly session cookie and removes it from the address bar. Don't share these links. Delete `.yt-down-key` to issue a new key; that signs out all devices.
+- On home Wi-Fi the connection is plain HTTP, like most home devices. Use `--local-only` on untrusted networks.
+- Your downloads, links, and key never touch GitHub or any cloud service. History stays on each device.
 
-[Deploy on Render](https://render.com/deploy?repo=https://github.com/asre1212/yt-down)
-
-The Blueprint selects Render’s free web-service plan and generates a private `API_KEY`. The user encountered a mandatory credit-card step even on Free, so Render is not the current no-card setup path. This repository does not provision a paid service automatically.
-
-1. Deploy the Blueprint from this repository.
-2. In the deployed service’s Environment settings, copy the generated `API_KEY`.
-3. Open the service’s HTTPS URL. YT Down detects its built-in server; enter the access key once to unlock this device.
-4. Set `docs/deployment.json` to `{"app_url":"https://YOUR-ACTUAL-SERVICE.onrender.com"}` and commit it. The original GitHub Pages app then automatically opens the full app. Copy the actual deployed URL; never guess it. Do not put a key in this file.
-
-**Free-only requirement:** retain `plan: free`. Before provisioning, check the account’s included bandwidth and ensure payment/spending settings cannot incur overages. Free compute is not an unlimited-bandwidth guarantee. Do not upgrade, purchase a subscription, or enable paid overages without explicit user authorization.
-
-**Reliability:** YouTube can block datacenter IP addresses. A successful deployment does not establish that YouTube downloads will work from that host. This is a deployment option, not a promise of a working bypass. A server on your home network can be a more suitable location when datacenter access is blocked. The app does not bypass sign-in, payment, DRM, or geographic restrictions.
-
-Free services can sleep or restart, and their disk is ephemeral. Jobs and prepared files are lost on restart. Keep the app open; re-prepare the video if a file expires. See [Render free-service limits](https://render.com/docs/free).
-
-### Option B: Docker on your own computer/server
-
-```sh
-docker build --pull -t yt-down .
-# Generate a private key, then put it in a local .env file (ignored by Git).
-python -c 'import secrets; print(secrets.token_urlsafe(32))'
-# .env must contain API_KEY=<generated key>
-docker run --rm --init --env-file .env -p 8080:8080 yt-down
-```
-
-Serve it behind an HTTPS reverse proxy for iPhone use. Set `PUBLIC_APP_URL` to the public HTTPS origin when a reverse proxy forwards HTTP internally; Render’s `RENDER_EXTERNAL_URL` is detected automatically. Device-session cookies require HTTPS. Allow the PWA’s exact origin in `ALLOWED_ORIGINS` (default `https://asre1212.github.io`). Same-origin hosting also works. Never place a key in a public config, a GitHub issue, a URL, or committed source. Only legacy external-server mode stores a key in browser local storage; integrated hosting uses a secure HttpOnly cookie instead; do not connect untrusted servers or use a shared browser profile.
-
-### Hugging Face alternative
-
-The repository also includes Docker Space metadata (`sdk: docker`, `app_port: 8080`). On an eligible existing account, mirror the repository to a Docker Space, set `API_KEY` as a private Space secret, and set `PUBLIC_APP_URL` to the actual `https://….hf.space` origin. Install the PWA from the direct app origin, rather than the Hub’s embedded preview.
-
-Hugging Face’s documentation checked November 7, 2026 says creating Docker Spaces requires a paid plan, even though CPU Basic has no hourly charge. It is **not the default for the user’s free-only requirement**, and no paid plan should be purchased. Both providers need a real YouTube download test from the deployed host.
-
-### Limits and maintenance
+## Limits
 
 | Setting | Default |
 |---|---|
 | Output | H.264 MP4 + AAC, up to 360/480/720/1080p |
 | File size | 512 MB (`MAX_FILE_MB`) |
-| Video duration | 3 hours (`MAX_DURATION_SECONDS`) |
-| Preparation deadline | 20 minutes |
-| Parallel preparation | 1; at most 2 pending jobs |
-| Prepared files | At most 4 total jobs retained, 30-minute expiry |
-| Temporary storage | `/tmp/yt-down`; purged on restart |
+| Video length | 3 hours (`MAX_DURATION_SECONDS`) |
+| Prepared files | 30-minute expiry, at most 4 kept; temp folder cleared on restart |
 
-FFmpeg merges audio/video; Deno and `yt-dlp[default]` provide YouTube extraction support. Rebuild with `--pull --no-cache` or use Render’s clear-cache redeploy to update yt-dlp when YouTube changes. Dependencies intentionally permit current yt-dlp rather than freezing an extractor that quickly becomes stale. Do not run more than one Uvicorn worker or service replica: job state is in memory.
+Private, members-only, paid, region-restricted, live, or removed videos can fail. The app never bypasses sign-in, DRM, or YouTube's bot checks, and it doesn't import account cookies. If downloads start failing after a YouTube change, restart `start.py` to update yt-dlp.
 
-Jobs require an authenticated device session or the legacy bearer access key; file links use separate random, short-lived download tokens so the server key never appears in a download URL. Access logs are disabled to avoid logging file tokens. API responses/files are never service-worker cached. Only canonical YouTube hosts/video IDs are accepted, and subprocesses use argument arrays, not a shell. Bot/sign-in failures are surfaced clearly. No account-cookie import is provided.
+## The GitHub Pages app
 
-## GitHub Pages and updates
+https://asre1212.github.io/yt-down/ is the same app, installable as an iPhone Home Screen web app. It cannot download by itself. If you started your computer with `--tunnel`, you can enter that HTTPS address and the access key under Settings. Otherwise, use the address printed by `start.py`. Pages publishes `main` → `/docs` (Settings → Pages → Deploy from a branch → main → /docs).
 
-In repository Settings → Pages, select **Deploy from a branch**, **main**, **/docs**, then Save. No frontend build is needed. `/docs` contains only public PWA assets.
-
-Updates are automatic on opening, returning to the foreground, reconnecting, and every 15 minutes while the app is visible. A downloaded update applies when the app is idle. Active jobs, an open Settings dialog, editing, and handing a file to the browser defer the reload. A ready result and pasted link survive reloads; the result is checked against the server again, so expired files are not presented as valid. Settings, device sessions and history are retained. Settings → Check for updates remains available.
-
-For every frontend change, run `npm run build` and commit the generated `docs/sw.js` with the source files. Its release identifier and asset hashes are generated from the actual content; CI rejects a stale generated worker. The worker verifies all assets before installing, so an interrupted or mixed deployment keeps the previous working shell. Update the display version in `docs/core.js` and `package.json` for a named release. No analytics or third-party UI assets are loaded.
-
-GitHub Pages republishes changes pushed to main. The Render service should use automatic deploys from main when activated. App updates do not install themselves while iOS has suspended or closed the PWA; checking resumes on opening. Prepared server files still expire after 30 minutes. Extractor dependencies update on a server rebuild, not through the PWA updater.
-
-## Development and checks
+## Docker (optional, for an always-on home server)
 
 ```sh
-pip install -r requirements.txt httpx
-npm ci
-npm run build
-npm test
-python -m unittest discover -s tests -v
-# Set API_KEY to a random string of at least 24 characters first.
-uvicorn server.app:app --host 127.0.0.1 --port 8080 --workers 1
+docker build --pull -t yt-down .
+python3 -c 'import secrets; print("API_KEY=" + secrets.token_urlsafe(32))' > .env
+docker run --rm --init --env-file .env -p 8080:8080 yt-down
 ```
 
-Automated tests cover URL validation, authorization, CORS, blocked-video errors, cancellation, file expiry, range downloads, rejection of HTML error pages posing as video, and the complete job/file API using a simulated extractor. FFprobe checks for H.264 video and AAC audio before a real job is marked ready. These tests do **not** prove live YouTube availability. Confirm a real video download from your deployed host and save it on an actual iPhone before relying on the service.
+Open `http://<that machine's IP>:8080/#key=<the key from .env>`. Run it on a home network. A cloud VPS IP is likely to be blocked by YouTube.
 
-### Real download acceptance check
-
-Unit tests simulate extraction; they are not proof that a host can download YouTube media. After deploying the full app, set `YT_DOWN_API_KEY` privately in the test process environment, then run:
+## Development
 
 ```sh
-python scripts/verify-download.py --server https://YOUR-ACTUAL-HOST --url 'https://www.youtube.com/watch?v=jNQXAC9IVRw' --quality 360 --output trial.mp4
+npm ci && npm run build && npm test
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt httpx
+.venv/bin/python -m unittest discover -s tests -v
 ```
 
-This opt-in check creates a real server job, downloads the completed file, and requires FFprobe to confirm H.264 video and AAC sound. It refuses to overwrite an existing file and does not print access keys or download tokens. It does not run in CI. Use a public video you have permission to download; the sample URL's availability may change.
+For every frontend change, run `npm run build` and commit the regenerated `docs/sw.js`. CI rejects a stale one. Real-download check against a running server (not run in CI):
 
-November 14, 2026 diagnosis: the live GitHub Pages deployment still contains `{"app_url":null}` and has no built-in `/api/config` endpoint. No backend has been connected by this repository. A real trial with current yt-dlp and Deno extracted “Me at the zoo” metadata, but media requests in the test environment returned 195-byte HTML “Site Unavailable” pages; the app rejected them and **no playable download was verified**. Version 1.2.1 checks a saved server before displaying a ready connection and explains missing backend configuration without erasing saved settings, history or job records. Hosting activation and a successful real-host trial remain required.
+```sh
+YT_DOWN_API_KEY="$(cat .yt-down-key)" python3 scripts/verify-download.py --server http://localhost:8080 \
+  --url 'https://www.youtube.com/watch?v=jNQXAC9IVRw' --quality 360 --output trial.mp4
+```
 
-Build verification on November 7, 2026: automated checks passed and the published frontend was opened successfully. A real YouTube metadata request succeeded, but media-file requests from the build environment returned a network “Site Unavailable” page; the end-to-end real-video test did not pass. The Docker image and physical iPhone saving still need deployment/device verification. No download server has been provisioned by this repository alone.
+### Verification log (November 14, 2026)
 
-Integration verification: version 1.1.0 adds same-origin discovery, secure 30-day device sessions, locking, origin checks and login-attempt limits. Twelve automated checks passed. Provider deployment and a real iPhone download remain pending; publishing source code does not activate a hosted server.
-
-## Technical references reviewed
-
-- [GitHub Pages: static hosting and publishing](https://docs.github.com/en/pages/getting-started-with-github-pages/creating-a-github-pages-site)
-- [Apple: turn a website into an iPhone app](https://support.apple.com/guide/iphone/open-as-web-app-iphea86e5236/ios)
-- [yt-dlp: external JavaScript requirements](https://github.com/yt-dlp/yt-dlp/wiki/EJS)
-- [Render Blueprint reference](https://render.com/docs/blueprint-spec)
-- [FastAPI file responses](https://fastapi.tiangolo.com/advanced/custom-response/)
-
-- [Hugging Face Docker Spaces](https://huggingface.co/docs/hub/spaces-sdks-docker)
-- [Hugging Face hosting eligibility](https://huggingface.co/docs/hub/spaces-overview)
-- [Render free-service limits and bandwidth](https://render.com/docs/free)
-
-Auto-update verification: version 1.2.0 adds automatic idle activation, foreground/online checks, draft and ready-result recovery, content-verified shell updates, and CI checks for stale assets. Automated tests cover busy-tab deferral, first install, activation from another tab, unavailable session storage, failed/offline checks, and mixed-release cache rejection. Live server downloads and physical iPhone saving remain unverified.
-
-- [MDN: checking for worker updates](https://developer.mozilla.org/en-US/docs/Web/API/ServiceWorkerRegistration/update)
-- [web.dev: service worker lifecycle](https://web.dev/articles/service-worker-lifecycle)
-- [MDN: activating a waiting worker](https://developer.mozilla.org/en-US/docs/Web/API/ServiceWorkerGlobalScope/skipWaiting)
-
-Railway preparation verification: the configuration parses successfully, and automated tests cover HTTPS public-domain discovery and explicit custom-origin precedence while rejecting other origins. Deployment, available account credits, network eligibility, and real video downloads remain unverified.
-
-- [Cloudflare Containers pricing](https://developers.cloudflare.com/containers/platform/pricing/)
-- [Railway pricing](https://railway.com/pricing)
-- [Railway trial and account verification](https://docs.railway.com/pricing/free-trial)
-- [Railway serverless idle sleeping](https://docs.railway.com/deployments/serverless)
-- [Railway config as code](https://docs.railway.com/config-as-code/reference)
+- GitHub Actions as a backend: **blocked** by YouTube on all 4 runner OSes, 2 videos, 4 player clients (32/32 "Sign in to confirm you're not a bot").
+- `python3 start.py` on a non-datacenter Linux machine: "Me at the zoo" (`jNQXAC9IVRw`) at 360p came out as an H.264 320×240 + AAC MP4, 19 s, 744 KB. Big Buck Bunny (`aqz-KE-bpKQ`) at 720p came out as an H.264 1280×720 + AAC MP4, 10:34, 182 MB, in about 15 s. Both passed an ffprobe check.
+- UI flow in Chrome with an iPhone viewport over the plain-HTTP network address: the `#key` link unlocked the device, the Shorts link was prepared, and **Save video** downloaded a playable MP4 with sound.
+- Not yet verified: a physical iPhone, Windows/macOS hosts, and `--tunnel`.
