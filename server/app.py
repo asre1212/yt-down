@@ -395,7 +395,7 @@ async def cancel_job(job_id: str):
 
 
 @app.get('/api/files/{job_id}/{token}')
-async def download_file(job_id: str, token: str):
+async def download_file(job_id: str, token: str, inline: bool = False):
     job = JOBS.get(job_id)
     if not job or job['state'] != 'ready' or not hmac.compare_digest(token, job.get('token', '')) or time.time() - job.get('finished', 0) > TTL:
         raise HTTPException(404, 'This download is unavailable or expired. Prepare the video again.')
@@ -403,7 +403,8 @@ async def download_file(job_id: str, token: str):
     if not path.is_file():
         raise HTTPException(404, 'The file is no longer available. Prepare the video again.')
     # Stream from disk; do not load a full video into server or iPhone JavaScript memory.
-    return FileResponse(path, media_type='video/mp4', filename=job['filename'], content_disposition_type='attachment')
+    # inline=1 opens Safari's video player, whose Share → Save to Files lets the user choose a folder.
+    return FileResponse(path, media_type='video/mp4', filename=job['filename'], content_disposition_type='inline' if inline else 'attachment')
 
 
 app.mount('/', StaticFiles(directory=ROOT / 'docs', html=True), name='app')

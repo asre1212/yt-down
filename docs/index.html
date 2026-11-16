@@ -36,8 +36,9 @@
     <section id="job-panel" class="job-panel" aria-live="polite" hidden>
       <div class="job-heading"><span class="status-dot" id="status-dot"></span><h2 id="job-title">Preparing your video</h2></div>
       <p id="job-detail"></p><progress id="progress" max="100" aria-label="Download progress"></progress>
-      <div class="job-actions"><a class="primary" id="save-file" hidden target="_blank" rel="noopener noreferrer">Save video ↓</a><button class="text-button" id="cancel" hidden>Cancel</button><button class="text-button" id="check-again" hidden>Check again</button></div>
-      <p id="save-help" class="small" hidden>Save to Files. To add to Photos, open the file → Share → Save Video. On a computer, it goes to your Downloads folder. The prepared file expires after 30 minutes.</p>
+      <div class="job-actions"><a class="primary" id="save-file" hidden target="_blank" rel="noopener noreferrer">Save video</a><button class="text-button" id="cancel" hidden>Cancel</button><button class="text-button" id="check-again" hidden>Check again</button></div>
+      <div class="save-options" id="save-options" hidden><a class="text-link" id="open-file" target="_blank" rel="noopener noreferrer">Open video to choose a folder ↗</a><a class="text-link" id="direct-download" target="_blank" rel="noopener noreferrer">Download to Downloads folder ↓</a></div>
+      <p id="save-help" class="small" hidden></p>
     </section>
 
     <button class="connection" id="connection"><span class="connection-dot" id="connection-dot"></span><span id="connection-text">Start YT Down on your computer</span><span aria-hidden="true">↗</span></button>

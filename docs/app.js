@@ -8,6 +8,13 @@ if (!config || typeof config !== 'object') config = {};
 let active = readStore('yt-down.active', null);
 let busy = false, polling = false, pollTimer, updates, bootComplete = false, readyJob = null, savingFile = false;
 let resumeState = null;
+// Above this size the share sheet would need the whole video in iPhone memory, so plain links are used instead.
+const SHARE_LIMIT = 250 * 1024 * 1024;
+let shareFile = null, shareLoad = null;
+function canShareFiles() {
+  try { return typeof navigator.share === 'function' && typeof navigator.canShare === 'function' && typeof File === 'function' && navigator.canShare({files:[new File([''], 'video.mp4', {type:'video/mp4'})]}); }
+  catch { return false; }
+}
 try { resumeState = JSON.parse(sessionStorage.getItem('yt-down.update-state')); sessionStorage.removeItem('yt-down.update-state'); } catch {}
 if (resumeState && typeof resumeState.url === 'string') $('video-url').value = resumeState.url;
 if ([360,480,720,1080].includes(Number(resumeState?.quality))) $('quality').value = resumeState.quality;
@@ -27,7 +34,8 @@ function setConnection(text, kind = '') { $('connection-text').textContent = tex
 function panel(title, detail, state = 'working') {
   $('job-panel').hidden = false; $('job-title').textContent = title; $('job-detail').textContent = detail;
   $('status-dot').style.background = state === 'error' ? '#d75a41' : '#829466';
-  $('save-file').hidden = state !== 'ready'; $('save-help').hidden = state !== 'ready';
+  $('save-file').hidden = state !== 'ready'; $('save-help').hidden = state !== 'ready'; $('save-options').hidden = state !== 'ready';
+  if (state !== 'ready') { shareFile = null; shareLoad?.abort(); shareLoad = null; }
   $('cancel').hidden = state !== 'working' || !active; $('check-again').hidden = state !== 'paused' || !active;
   $('progress').hidden = !['working', 'paused'].includes(state);
   $('progress').removeAttribute('value');
@@ -141,8 +149,8 @@ async function poll() {
       if (link.origin !== new URL(config.url).origin || !link.pathname.startsWith('/api/files/')) throw new Error('The server returned an invalid download address.');
       const size = Math.round(job.size / 1024 / 1024);
       panel(job.title || 'Your video is ready', `${size} MB · MP4 with sound. Tap below to save.`, 'ready');
-      $('save-file').href = link.href; $('save-file').download = job.filename || 'video.mp4';
-      readyJob = {...active}; addHistory(job); clearActive(); setBusy(false); return;
+      readyJob = {...active}; addHistory(job); clearActive(); setBusy(false);
+      offerSave(link, job); return;
     }
     if (['error','cancelled','expired'].includes(job.state)) { panel('Couldn’t prepare this video', job.error || 'This download is no longer available. Please try again.', 'error'); clearActive(); setBusy(false); return; }
     panel(job.title || 'Preparing your video', job.message || 'Getting the video ready. Keep this app open.');
@@ -181,7 +189,45 @@ document.addEventListener('visibilitychange', () => {
   updates?.resume(); updates?.check();
 });
 window.addEventListener('online', () => { updates?.resume(); updates?.check(); });
-$('save-file').onclick = () => { savingFile = true; toast('Your browser will open the download. Choose Save to Files.'); };
+function offerSave(link, job) {
+  const name = job.filename || 'video.mp4';
+  const inline = new URL(link); inline.searchParams.set('inline', '1');
+  $('direct-download').href = link.href; $('direct-download').download = name;
+  $('open-file').href = inline.href;
+  $('save-file').href = link.href; $('save-file').download = name;
+  const share = canShareFiles();
+  if (share && job.size <= SHARE_LIMIT) {
+    // Load the file before the tap: iOS only opens the share sheet straight from a tap, not after a long wait.
+    $('save-file').textContent = 'Getting the file ready…'; $('save-file').dataset.mode = 'loading';
+    $('direct-download').hidden = false; $('open-file').hidden = true;
+    $('save-help').textContent = 'Save video opens the share sheet: choose Save to Files to pick any folder, or Save Video for Photos. The prepared file expires after 30 minutes.';
+    const controller = new AbortController(); shareLoad = controller;
+    fetch(link.href, {cache:'no-store', credentials:'omit', signal:controller.signal})
+      .then(response => { if (!response.ok) throw new Error(); return response.blob(); })
+      .then(blob => { if (shareLoad !== controller) return; shareFile = new File([blob], name, {type:'video/mp4'}); $('save-file').textContent = 'Save video…'; $('save-file').dataset.mode = 'share'; })
+      .catch(() => { if (shareLoad !== controller) return; plainSave('The file could not be loaded for the share sheet.'); })
+      .finally(() => { if (shareLoad === controller) shareLoad = null; });
+  } else plainSave(share ? `This video is over ${SHARE_LIMIT / 1024 / 1024} MB, too big for the share sheet.` : '');
+}
+function plainSave(reason) {
+  shareFile = null; $('save-file').textContent = 'Save video ↓'; $('save-file').dataset.mode = 'download';
+  $('direct-download').hidden = true; $('open-file').hidden = false;
+  $('save-help').textContent = (reason ? reason + ' ' : '') + 'Save video puts it in Files → Downloads (on a computer, your Downloads folder). To pick a folder instead, tap Open video, then Share → Save to Files, or Save Video for Photos. The prepared file expires after 30 minutes.';
+}
+$('save-file').onclick = async event => {
+  const mode = $('save-file').dataset.mode;
+  if (mode === 'loading') { event.preventDefault(); return toast('Still getting the file ready. Try again in a moment.'); }
+  if (mode === 'share' && shareFile) {
+    event.preventDefault(); savingFile = true;
+    try { await navigator.share({files:[shareFile], title:shareFile.name}); }
+    catch (e) { if (e?.name !== 'AbortError') { toast('Sharing is unavailable here, so the video will download instead.'); $('direct-download').click(); } }
+    finally { savingFile = false; resumeUpdates(); }
+    return;
+  }
+  savingFile = true; toast('Your browser will download the video to Downloads.');
+};
+$('open-file').onclick = () => { savingFile = true; toast('In the video player, tap Share → Save to Files and pick a folder.'); };
+$('direct-download').onclick = () => { savingFile = true; };
 $('update').onclick = () => updates ? updates.check(true) : toast('Updates require a secure connection. Reopen the app online.');
 if ('serviceWorker' in navigator) {
   updates = new AppUpdates({

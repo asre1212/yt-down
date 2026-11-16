@@ -25,11 +25,22 @@ Each time you want to download:
    ```
    The first run takes about a minute while it installs yt-dlp, FFmpeg, and Deno into `.venv`. After that it starts in seconds and updates yt-dlp automatically.
 4. Your browser opens YT Down. Paste a link, choose a quality, tap **Prepare download**, then **Save video**. On a computer the file goes to your Downloads folder.
-5. **iPhone:** keep the computer on the same Wi-Fi and scan the QR code shown in the terminal with the Camera, or type the `http://192.168.…` address into Safari. The link unlocks your phone automatically. Tap **Save video** → **Download** and the MP4 goes to Files → Downloads. To put it in Photos, open it in Files → Share → **Save Video**.
+5. **iPhone:** keep the computer on the same Wi-Fi and scan the QR code shown in the terminal with the Camera, or type the `http://192.168.…` address into Safari. The link unlocks your phone automatically. See [Saving on iPhone](#saving-on-iphone-choosing-a-folder) for where the video goes.
 
 Leave the terminal window open while you use the app. Press Ctrl+C to stop.
 
 If your computer asks whether Python may accept incoming network connections, click **Allow** so the iPhone can reach it. Use `python3 start.py --local-only` if you only use the computer.
+
+### Saving on iPhone: choosing a folder
+
+When a video is ready, the app shows one of two layouts:
+
+- **Plain Wi-Fi address (`http://192.168.…`)**, the usual case:
+  - **Open video to choose a folder** opens the MP4 in Safari's video player. Tap **Share** → **Save to Files** to pick any folder, or **Save Video** to put it in Photos.
+  - **Save video ↓** downloads straight to Files → Downloads. To change that default folder, go to iPhone Settings → Apps → Safari → Downloads.
+- **Secure (HTTPS) address**, such as `--tunnel`: **Save video…** opens the iOS share sheet directly, with **Save to Files** (folder picker) and **Save Video** (Photos). **Download to Downloads folder** is still offered. The app loads the file before you tap, because iOS only opens the share sheet straight from a tap. Videos over 250 MB skip the share sheet to avoid running the iPhone out of memory and use the plain links instead.
+
+Why the difference: browsers only allow the Web Share API (`navigator.share`) on secure pages (HTTPS or `localhost`). A home-network `http://192.168.…` address isn't one, so there the app uses Safari's own player and Share button.
 
 ### Options
 
@@ -92,3 +103,4 @@ YT_DOWN_API_KEY="$(cat .yt-down-key)" python3 scripts/verify-download.py --serve
 - `python3 start.py` on a non-datacenter Linux machine: "Me at the zoo" (`jNQXAC9IVRw`) at 360p came out as an H.264 320×240 + AAC MP4, 19 s, 744 KB. Big Buck Bunny (`aqz-KE-bpKQ`) at 720p came out as an H.264 1280×720 + AAC MP4, 10:34, 182 MB, in about 15 s. Both passed an ffprobe check.
 - UI flow in Chrome with an iPhone viewport over the plain-HTTP network address: the `#key` link unlocked the device, the Shorts link was prepared, and **Save video** downloaded a playable MP4 with sound.
 - Not yet verified: a physical iPhone, Windows/macOS hosts, and `--tunnel`.
+- v2.1.0 save options (November 16, 2026): checked in desktop Chrome with an iPhone-sized window. On the plain-HTTP network address, `navigator.share` was undefined, so the app offered the download and the player link. `?inline=1` returned the 744 KB MP4 as `video/mp4` with `inline`. With a stubbed `navigator.share` on `localhost`, the share sheet received the full MP4 as a `video/mp4` file. The iOS Safari Share → Save to Files folder picker hasn't been tried on a real iPhone.

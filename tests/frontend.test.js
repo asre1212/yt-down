@@ -11,7 +11,7 @@ const syntheticHistory = [{url:'https://youtu.be/nQlCeT4oDAw',title:'Synthetic s
 const syntheticActive = {id:'synthetic-pending-job',url:'https://www.youtube.com/watch?v=nQlCeT4oDAw',quality:360,server:'https://other-synthetic.example'};
 const syntheticDraft = {url:'https://youtu.be/nQlCeT4oDAw',quality:480};
 
-async function fixture({config,discovery=null,checkStatus=200,checkBody={ok:true},offline=false,pendingCheck=false,sessionStatus=200,checkResponses=[],active=syntheticActive,url='https://synthetic-pages.example/yt-down/'}={}) {
+async function fixture({config,discovery=null,checkStatus=200,checkBody={ok:true},offline=false,pendingCheck=false,sessionStatus=200,checkResponses=[],active=syntheticActive,url='https://synthetic-pages.example/yt-down/',job=null,share=null}={}) {
   const dom = new JSDOM(html, {url,runScripts:'outside-only'});
   const w = dom.window, calls = [];
   w.AbortController = AbortController; w.AbortSignal = AbortSignal;
@@ -24,7 +24,8 @@ async function fixture({config,discovery=null,checkStatus=200,checkBody={ok:true
   w.sessionStorage.setItem('yt-down.update-state', JSON.stringify(syntheticDraft));
   let finishCheck;
   const checkWait = pendingCheck ? new Promise(resolve => { finishCheck = resolve; }) : null;
-  const reply = (status,data) => ({ok:status>=200&&status<300,status,json:async()=>data});
+  const reply = (status,data) => ({ok:status>=200&&status<300,status,json:async()=>data,blob:async()=>new w.Blob(['synthetic-mp4-bytes'],{type:'video/mp4'})});
+  if (share) { Object.defineProperty(w.navigator,'share',{value:share.share,configurable:true}); Object.defineProperty(w.navigator,'canShare',{value:share.canShare ?? (()=>true),configurable:true}); }
   w.fetch = async (value,options={}) => {
     const target = new URL(value,w.location.href); calls.push({url:target.href,options});
     if (target.pathname.endsWith('/api/config')) return reply(discovery ? 200 : 404, discovery);
@@ -36,7 +37,8 @@ async function fixture({config,discovery=null,checkStatus=200,checkBody={ok:true
       const next=checkResponses.shift();
       return reply(next?.status??checkStatus,next?.body??checkBody);
     }
-    if (target.pathname.startsWith('/api/jobs/')) return reply(200,{id:active.id,state:'working',message:'Synthetic preparation in progress'});
+    if (target.pathname.startsWith('/api/jobs/')) return reply(200,job ?? {id:active.id,state:'working',message:'Synthetic preparation in progress'});
+    if (target.pathname.startsWith('/api/files/')) return reply(200,null);
     throw new Error('Unexpected fixture network request: '+target.href);
   };
   w.eval(core+'\n'+app+'\nwindow.testBoot = boot;');
@@ -232,4 +234,60 @@ test('a rejected #key leaves the device locked and explains why', async t => {
   assert.equal(f.w.location.hash,'');
   assert.equal(f.q('connection-text').textContent,'Unlock this device to download');
   assert(!f.calls.some(call=>call.url.includes('/api/check')));
+});
+
+const readyOrigin='http://192.168.1.20:8080';
+const readyJob=(size=5*1024*1024)=>({id:'synthetic-ready-job',state:'ready',title:'Synthetic video',size,filename:'Synthetic video.mp4',download_url:'/api/files/synthetic-ready-job/synthetic-token'});
+const settle=async()=>{ for (let i=0;i<5;i++) await new Promise(resolve=>setImmediate(resolve)); };
+async function readyFixture(options) {
+  const active={...syntheticActive,id:'synthetic-ready-job',server:readyOrigin};
+  const f=await fixture({active,discovery:{app:'yt-down',integrated:true,unlocked:true,configured:true,tools_ready:true},url:readyOrigin+'/',...options});
+  await settle(); return f;
+}
+
+test('plain HTTP (no Web Share) offers a direct download plus an inline player link for choosing a folder', async t => {
+  const f=await readyFixture({job:readyJob()}); t.after(f.close);
+  assert.equal(f.q('save-file').dataset.mode,'download');
+  assert.equal(f.q('save-file').href,readyOrigin+'/api/files/synthetic-ready-job/synthetic-token');
+  assert.equal(f.q('save-file').download,'Synthetic video.mp4');
+  assert(!f.q('open-file').hidden);
+  assert.equal(new URL(f.q('open-file').href).searchParams.get('inline'),'1');
+  assert.match(f.q('save-help').textContent,/Open video, then Share → Save to Files/);
+  assert(!f.calls.some(call=>call.url.includes('/api/files/')),'must not load the video into memory without a share sheet');
+});
+
+test('with file sharing, the video is loaded before the tap and Save video opens the share sheet', async t => {
+  const shared=[];
+  const f=await readyFixture({job:readyJob(),share:{share:async data=>{ shared.push(data); }}}); t.after(f.close);
+  assert(f.calls.some(call=>call.url===readyOrigin+'/api/files/synthetic-ready-job/synthetic-token'));
+  assert.equal(f.q('save-file').dataset.mode,'share');
+  assert(!f.q('direct-download').hidden); assert(f.q('open-file').hidden);
+  let prevented=false;
+  await f.q('save-file').onclick({preventDefault(){ prevented=true; }});
+  assert(prevented); assert.equal(shared.length,1);
+  assert.equal(shared[0].files[0].name,'Synthetic video.mp4'); assert.equal(shared[0].files[0].type,'video/mp4');
+});
+
+test('cancelling the share sheet does not start a download; a share failure falls back to downloading', async t => {
+  let error={name:'AbortError'};
+  const f=await readyFixture({job:readyJob(),share:{share:async()=>{ throw error; }}}); t.after(f.close);
+  let clicks=0; f.q('direct-download').click=()=>{ clicks++; };
+  await f.q('save-file').onclick({preventDefault(){}});
+  assert.equal(clicks,0);
+  error={name:'NotAllowedError'};
+  await f.q('save-file').onclick({preventDefault(){}});
+  assert.equal(clicks,1);
+});
+
+test('videos over the share size limit are never loaded into memory and use plain links', async t => {
+  const f=await readyFixture({job:readyJob(300*1024*1024),share:{share:async()=>{}}}); t.after(f.close);
+  assert.equal(f.q('save-file').dataset.mode,'download');
+  assert(!f.calls.some(call=>call.url.includes('/api/files/')));
+  assert.match(f.q('save-help').textContent,/over 250 MB/);
+});
+
+test('a browser that cannot share files uses plain links', async t => {
+  const f=await readyFixture({job:readyJob(),share:{share:async()=>{},canShare:()=>false}}); t.after(f.close);
+  assert.equal(f.q('save-file').dataset.mode,'download');
+  assert(!f.calls.some(call=>call.url.includes('/api/files/')));
 });
